@@ -8,3 +8,5 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "unknown"
 finally:
     del version, PackageNotFoundError
+
+from opensemantic.base._model import *  # noqa
