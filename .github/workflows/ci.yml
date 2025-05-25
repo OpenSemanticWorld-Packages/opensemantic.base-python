@@ -66,6 +66,8 @@ jobs:
         - ubuntu-latest
         - macos-latest
         - windows-latest
+    permissions:
+      contents: read
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -78,8 +80,8 @@ jobs:
         with: {name: python-distribution-files, path: dist/}
       - name: Run tests
         run: >-
-          pipx run --python '${{ steps.setup-python.outputs.python-path }}'
-          tox --installpkg '${{ needs.prepare.outputs.wheel-distribution }}'
+          pipx run tox -e test
+          --installpkg '${{ needs.prepare.outputs.wheel-distribution }}'
           -- -rFEx --durations 10 --color yes  # pytest args
       - name: Generate coverage report
         run: pipx run coverage lcov -o coverage.lcov
