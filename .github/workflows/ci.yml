@@ -60,8 +60,8 @@ jobs:
     strategy:
       matrix:
         python:
-        - "3.9"  # oldest Python supported by PSF
-        - "3.12"  # newest Python that is stable
+        - "3.10"  # oldest Python supported by PSF
+        - "3.13"  # newest Python that is stable
         platform:
         - ubuntu-latest
         - macos-latest
@@ -80,8 +80,8 @@ jobs:
         with: {name: python-distribution-files, path: dist/}
       - name: Run tests
         run: >-
-          pipx run tox -e test
-          --installpkg '${{ needs.prepare.outputs.wheel-distribution }}'
+          pipx run --python '${{ steps.setup-python.outputs.python-path }}'
+          tox -e test --installpkg '${{ needs.prepare.outputs.wheel-distribution }}'
           -- -rFEx --durations 10 --color yes  # pytest args
       - name: Generate coverage report
         run: pipx run coverage lcov -o coverage.lcov
