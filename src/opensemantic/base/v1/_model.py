@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from opensemantic.core.v1 import (
     Category,
+    CharacteristicType,
     Data,
     DefinedTerm,
     Description,
@@ -6069,32 +6070,6 @@ class Host(Device):
 #   filename:  OSWda27e2fff10848ebb728ffb69c49a16d.json
 
 
-class DataSource(OswBaseModel):
-    class Config:
-        schema_extra = {"title": "Data Source", "title*": {"de": "Datenquelle"}}
-
-    uuid: UUID = Field(default_factory=uuid4, options={"hidden": False}, title="UUID")
-    name: str = Field(
-        ...,
-        description_={"de": "Technischer / Maschinenkompatibler Name"},
-        options={"hidden": False},
-        title="Name",
-    )
-    """
-    Technical / Machine compatible name
-    """
-    type: str | None = Field(
-        None,
-        options={
-            "autocomplete": {
-                "query": "[[HasType::Category:Category]] |?Display_title_of=label"
-            }
-        },
-        title="Type (depricated)",
-        title_={"de": "Type"},
-    )
-
-
 class DatabaseSchemaEntry(OswBaseModel):
     class Config:
         schema_extra = {"title": "DatabaseSchemaEntry"}
@@ -6109,6 +6084,88 @@ class DatabaseSchemaEntry(OswBaseModel):
     schema_name: str = Field(..., title="Schema name", title_={"de": "Schema-Name"})
 
 
+class DataChannel(OswBaseModel):
+    class Config:
+        schema_extra = {
+            "title": "DataChannel",
+            "title*": {"en": "Data channel", "de": "Datenkanal"},
+            "headerTemplate": "{{ i1 }} - {{{ self.name }}}",
+            "defaultProperties": ["label", "description", "characteristic", "unit"],
+        }
+
+    uuid: str = Field(
+        ...,
+        dynamic_template="{{_uuid_}}",
+        field_comment="format uuid field are copied, if not set in copy_ignore",
+        options={"hidden": True, "dynamic_template": {"override": "empty"}},
+        title="UUID",
+    )
+    osw_id: str = Field(
+        ...,
+        dynamic_template="{{_current_subject_}}#OSW{{#replace '-' ''}}{{_own_uuid}}{{/replace}}",
+        options={"hidden": True, "dynamic_template": {"override": "always"}},
+        title="OSW-ID",
+        watch={"_own_uuid": "channel.uuid"},
+    )
+    name: str = Field(
+        ..., description_={"de": "Technischer Name / Schlüsselwort"}, title="Name"
+    )
+    """
+    Technical name / keyword
+    """
+    label: list[Label] | None = Field(
+        None,
+        eval_template=[
+            {
+                "type": "mustache-wikitext",
+                "mode": "render",
+                "$comment": "Displays value according to user language with eng as fallback option. Note: {{=<% %>=}} changes mustache expression from {{..}} to <% %> for mixing with wikitext templates",
+                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%#label%> | {{#ifeq: <%lang%>|en|#default|<%lang%>}} = <%text%> <%/label%> }}",
+            }
+        ],
+        options={"grid_columns": 12},
+        title="Label(s)",
+        title_={"de": "Bezeichnung(en)"},
+    )
+    description: list[Description] | None = Field(
+        None,
+        eval_template={
+            "type": "mustache-wikitext",
+            "mode": "render",
+            "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#description}} |{{lang}}={{text}} {{/description}} {{=<% %>=}} }}",
+        },
+        options={"grid_columns": 12},
+        title="Description",
+        title_={"de": "Beschreibung"},
+    )
+    characteristic: CharacteristicType | None = Field(
+        None,
+        description_={
+            "de": "Die Charakteristik oder Klasse die den Datenwert spezifiziert"
+        },
+        field_comment="range CharacteristicType, subclass_of range Characteristic for convenience.",
+        range="Category:OSWffe74f291d354037b318c422591c5023",
+        subclassof_range="Category:OSW93ccae36243542ceac6c951450a81d47",
+        title="Characteristic",
+        title_={"de": "Charakteristik"},
+    )
+    """
+    The characteristic or class defining the data value object
+    """
+    unit: str | None = Field(
+        None,
+        options={
+            "autocomplete": {
+                "$comment": "Chain: Characteristic -(SubClassOf)*-> Ancestor -HasQuantity-> QK -HasUnit-> Unit. -SubClassOf follows the chain upward. 3 levels.",
+                "query": "[[-HasUnit.-HasQuantity::{{$(characteristic_w)}}]][[HasSymbol::like:*{{_user_input}}*]]OR[[-HasUnit.-HasQuantity.-SubClassOf::{{$(characteristic_w)}}]][[HasSymbol::like:*{{_user_input}}*]]OR[[-HasUnit.-HasQuantity.-SubClassOf.-SubClassOf::{{$(characteristic_w)}}]][[HasSymbol::like:*{{_user_input}}*]]OR[[-HasUnit.-HasQuantity.-SubClassOf.-SubClassOf.-SubClassOf::{{$(characteristic_w)}}]][[HasSymbol::like:*{{_user_input}}*]]|?HasSymbol=label",
+            }
+        },
+        title="Unit",
+        title_={"de": "Einheit"},
+        watch={"characteristic_w": "channel.characteristic"},
+    )
+
+
 class DataTool(Tool):
     class Config:
         schema_extra = {
@@ -6119,10 +6176,20 @@ class DataTool(Tool):
                         "@id": "Property:HasStorageLocation",
                         "@type": "@id",
                     },
-                    "data_channels": {"@id": "Property:HasDataSource", "@type": "@id"},
+                    "data_channels": {
+                        "@id": "Property:HasDataChannel",
+                        "@type": "@id",
+                        "@context": {
+                            "characteristic": {
+                                "@id": "Property:HasCharacteristic",
+                                "@type": "@id",
+                            }
+                        },
+                    },
                 },
             ],
             "title": "DataTool",
+            "defaultProperties": ["storage_locations", "data_channels"],
         }
 
     type: list[str] | None = ["Category:OSWda27e2fff10848ebb728ffb69c49a16d"]
@@ -6133,15 +6200,11 @@ class DataTool(Tool):
         title_={"en": "Storage location (database)", "de": "Speicherort (Datenbank)"},
     )
     # note: removed min_items/max_items due to forward reference
-    data_channels: list[DataSource] | None = Field(
+    data_channels: list[DataChannel] | None = Field(
         None,
-        eval_template={
-            "type": "mustache-wikitext",
-            "mode": "render",
-            "value": "{{#data_sources}} {{{name}}} [[:{{{type}}}]] <br>{{/data_sources}}",
-        },
-        title="Data Source",
-        title_={"de": "Datenquellen"},
+        options={"enable_array_copy": True, "array_copy_ignore": ["uuid", "osw_id"]},
+        title="DataChannels",
+        title_={"en": "Data channels", "de": "Datenkanäle"},
     )
 
 
@@ -7074,6 +7137,7 @@ Constituent.update_forward_refs()
 Corporation.update_forward_refs()
 Country.update_forward_refs()
 CreativeWork.update_forward_refs()
+DataChannel.update_forward_refs()
 DataFormat.update_forward_refs()
 DataSoftware.update_forward_refs()
 DataTerm.update_forward_refs()
