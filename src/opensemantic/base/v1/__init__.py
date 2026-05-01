@@ -10,3 +10,8 @@ finally:
     del version, PackageNotFoundError
 
 from opensemantic.base.v1._model import *  # noqa
+
+try:
+    from opensemantic.base.v1._controller import *  # noqa
+except ImportError:
+    pass
