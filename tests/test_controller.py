@@ -281,3 +281,96 @@ def test_v1_local_db_crud(sqlite_db_v1):
         assert "OSW_v1t" not in await sqlite_db_v1.get_tools_list()
 
     asyncio.run(_test())
+
+
+# -- DataToolController tests --
+
+
+def test_datatool_controller_get_all_channels():
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._model import DataChannel
+
+    ch1 = DataChannel(uuid=str(uuid4()), osw_id="ch1", name="ch1")
+    ch2 = DataChannel(uuid=str(uuid4()), osw_id="ch2", name="ch2")
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        data_channels=[ch1, ch2],
+    )
+    assert len(dt.get_all_channels()) == 2
+
+
+def test_datatool_controller_get_subdevices():
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._model import DataChannel
+
+    ch = DataChannel(uuid=str(uuid4()), osw_id="ch1", name="ch1")
+    sub = DataToolController(
+        name="sub",
+        label=[Label(text="Sub")],
+        data_channels=[ch],
+    )
+    parent = DataToolController(
+        name="parent",
+        label=[Label(text="Parent")],
+        data_channels=[],
+        subdevices=[sub],
+    )
+    assert len(parent.get_subdevices()) == 1
+    assert len(parent.get_all_channels()) == 1
+
+
+def test_datatool_controller_get_channel_owner():
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._model import DataChannel
+
+    ch1 = DataChannel(uuid=str(uuid4()), osw_id="ch1", name="ch1")
+    ch2 = DataChannel(uuid=str(uuid4()), osw_id="ch2", name="ch2")
+    sub = DataToolController(
+        name="sub",
+        label=[Label(text="Sub")],
+        data_channels=[ch2],
+    )
+    parent = DataToolController(
+        name="parent",
+        label=[Label(text="Parent")],
+        data_channels=[ch1],
+        subdevices=[sub],
+    )
+    assert parent.get_channel_owner(ch1).name == "parent"
+    assert parent.get_channel_owner(ch2).name == "sub"
+
+
+def test_datatool_controller_osw_id():
+    from opensemantic.base import DataToolController
+
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+    )
+    osw_id = dt.get_osw_id()
+    assert osw_id.startswith("OSW")
+    assert "-" not in osw_id
+
+
+def test_datatool_controller_subobject_ids():
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._model import DataChannel
+
+    ch = DataChannel(uuid=str(uuid4()), osw_id="temp", name="ch1")
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        data_channels=[ch],
+    )
+    parent_osw = dt.get_osw_id()
+    ch_osw = dt.data_channels[0].osw_id
+    assert ch_osw.startswith(parent_osw + "#")

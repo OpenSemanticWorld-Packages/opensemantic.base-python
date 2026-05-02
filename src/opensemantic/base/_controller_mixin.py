@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
+from oold.model import BaseController
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from opensemantic.base._controller_logic import (
@@ -28,7 +29,7 @@ from opensemantic.base._controller_logic import (
 _logger = logging.getLogger(__name__)
 
 
-class DataToolMixin:
+class DataToolMixin(BaseController):
     """Generic controller mixin for DataTool models.
 
     Provides: identity, channel/subdevice traversal, archiving, data change handling.
@@ -42,7 +43,26 @@ class DataToolMixin:
         if not isinstance(getattr(self, "_channel_dict", None), dict):
             object.__setattr__(self, "_channel_dict", {})
         for channel in self.get_all_channels():
-            self._channel_dict[channel.node_id] = channel
+            # Use node_id if available (OPC UA), fall back to uuid
+            key = getattr(channel, "node_id", None) or channel.uuid
+            self._channel_dict[key] = channel
+        # Warn about unloaded channel characteristics
+        self._check_channel_characteristics()
+        # TODO: update wiki OpcUaServer model to include endpoint/url field
+        # so it survives serialization. Currently url is controller-only.
+
+        # Auto-init archive database from storage_locations
+        # Also re-init if archive_database is a raw dict (from deserialization)
+        _archive_db = getattr(self, "archive_database", None)
+        _needs_init = _archive_db is None or isinstance(_archive_db, dict)
+        if (
+            self.auto_archive
+            and _needs_init
+            and getattr(self, "storage_locations", None)
+        ):
+            self.archive_database = self._init_archive_database(
+                self.storage_locations[0]
+            )
 
     def __setattr__(self, name, value):
         if name.startswith("_"):
@@ -110,6 +130,32 @@ class DataToolMixin:
                 if hasattr(child, "_compute_subobject_ids"):
                     child._compute_subobject_ids(parent_chain=new_osw_id)
 
+    def _check_channel_characteristics(self):
+        """Warn if any channel has an unresolvable characteristic IRI.
+
+        A characteristic IRI that is not in oold's _types registry
+        means typed read/write will fail for that channel unless
+        target_schema is passed explicitly.
+        """
+        try:
+            from oold.model import _types
+        except ImportError:
+            return
+        for ch in self.get_all_channels():
+            iris = getattr(ch, "__iris__", {}).get("characteristic", [])
+            if isinstance(iris, str):
+                iris = [iris]
+            for iri in iris:
+                if iri and iri not in _types:
+                    _logger.warning(
+                        "Channel '%s': characteristic IRI '%s' is not "
+                        "in the type registry. Import the corresponding "
+                        "package (e.g. opensemantic.characteristics."
+                        "quantitative) to enable typed read/write.",
+                        ch.name,
+                        iri,
+                    )
+
     def get_credential(self, iri: str):
         """Look up a credential for the given IRI.
 
@@ -129,6 +175,97 @@ class DataToolMixin:
             config = CredentialManager.CredentialConfig(iri=iri)
             return self.credential_manager.get_credential(config)
         return _global_get_credential(iri)
+
+    def _init_archive_database(self, db):
+        """Create a TimeSeriesDatabaseController from a Database entity.
+
+        Uses oold's backend resolution to get the full Database instance
+        (if db is an IRI string), then casts it to the appropriate
+        controller class.
+
+        Parameters
+        ----------
+        db
+            A Database model instance or IRI string from storage_locations.
+
+        Returns
+        -------
+            A TimeSeriesDatabaseController instance, or None.
+        """
+        # Already a controller - return as-is
+        if isinstance(db, BaseController):
+            return db
+
+        # If db is a string IRI, it hasn't been resolved yet
+        if isinstance(db, str):
+            _logger.warning(
+                "storage_locations[0] is an unresolved IRI: %s. "
+                "Register a backend with set_backend() to enable "
+                "auto-resolution.",
+                db,
+            )
+            return None
+
+        # Determine target controller class and extra kwargs
+        server = getattr(db, "server", None)
+        server_url = getattr(server, "url", None) if server else None
+
+        if server_url:
+            try:
+                from opensemantic.base._controller import (
+                    PostgrestTimeSeriesDatabaseController,
+                )
+
+                controller = db.cast(
+                    PostgrestTimeSeriesDatabaseController,
+                    remove_extra=True,
+                )
+                _logger.info(
+                    "Auto-initialized PostgrestTimeSeriesDatabaseController"
+                    " for %s at %s",
+                    db.name,
+                    server_url,
+                )
+                return controller
+            except (ImportError, Exception) as e:
+                _logger.warning(
+                    "Could not create PostgREST controller for %s: %s."
+                    " Falling back to local SQLite.",
+                    db.name,
+                    e,
+                )
+
+        # Fall back to local SQLite
+        try:
+            # Use version-matching controller (v1 db -> v1 controller)
+            db_module = type(db).__module__
+            if ".v1." in db_module or db_module.endswith(".v1"):
+                from opensemantic.base.v1._controller import (
+                    LocalTimeSeriesDatabaseController,
+                )
+            else:
+                from opensemantic.base._controller import (
+                    LocalTimeSeriesDatabaseController,
+                )
+            db_path = f"./{db.name}.sqlite"
+            controller = db.cast(
+                LocalTimeSeriesDatabaseController,
+                remove_extra=True,
+                db_path=db_path,
+            )
+            _logger.info(
+                "Auto-initialized LocalTimeSeriesDatabaseController" " for %s at %s",
+                db.name,
+                db_path,
+            )
+            return controller
+        except ImportError:
+            _logger.error(
+                "Cannot auto-initialize archive database: "
+                "install opensemantic.base[controller] "
+                "(aiosqlite or postgrest)"
+            )
+            return None
 
     def get_subdevices(self) -> list:
         if self.subdevices is None:
@@ -187,7 +324,10 @@ class DataToolMixin:
 
     # -- Async methods --
 
-    async def _handle_data_change(self, params):
+    async def _handle_data_change(
+        self,
+        params: "DataToolMixin.ChannelDataChangeNotificationParams",
+    ):
         if not hasattr(self, "_last_values"):
             self._last_values = {}
         if params.channel.uuid in self._last_values:
@@ -252,7 +392,7 @@ class DataToolMixin:
         """Called when the archive DB goes offline. Override in subclasses."""
         pass
 
-    async def configure_auto_archive(self, params):
+    async def configure_auto_archive(self, params: "DataToolMixin.AutoArchiveParams"):
         if params.enable and self.archive_database is None:
             raise ValueError("Auto archive enabled but no archive database set")
         self.auto_archive = params.enable
@@ -275,7 +415,10 @@ class DataToolMixin:
                         _logger.error("Error creating tool %s: %s", osw_id, e)
             await asyncio.sleep(1)
 
-    async def read_archive_data(self, params=None):
+    async def read_archive_data(
+        self,
+        params: "DataToolMixin.ReadArchiveDataParams" = None,
+    ):
         if self.archive_database is None:
             raise ValueError("No archive database configured")
         if params is None:
@@ -306,13 +449,143 @@ class DataToolMixin:
     def read_archive_data_sync(self, params=None):
         return asyncio.run(self.read_archive_data(params=params))
 
+    # -- Typed read/write --
+
+    class TypedDataRow(BaseModel):
+        """A single typed data point for store_typed_data."""
+
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        ts: dt.datetime
+        channel: Any  # DataChannel with characteristic set
+        value: Any  # Characteristic instance (e.g. Temperature)
+
+    class StoreTypedDataParams(BaseModel):
+        """Parameters for store_typed_data."""
+
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        tool_osw_id: str
+        rows: List[Any]  # List of TypedDataRow
+        include_defaults: bool = False
+
+    async def store_typed_data(self, params: "DataToolMixin.StoreTypedDataParams"):
+        """Write characteristic instances to the archive database.
+
+        Converts values to base units via to_base(), then serializes
+        with to_json(). By default, strips fields that match class
+        defaults (type, unit) for compact storage.
+        """
+        if self.archive_database is None:
+            raise ValueError("No archive database configured")
+        raw_rows = []
+        for row in params.rows:
+            val = row.value
+            if hasattr(val, "to_base"):
+                try:
+                    val = val.to_base()
+                except Exception:
+                    pass  # offset units (e.g. Celsius) - keep as-is
+            data = val.to_json(exclude_defaults=not params.include_defaults)
+            ch_osw_id = row.channel.get_osw_id()
+            if "#" in ch_osw_id:
+                ch_osw_id = ch_osw_id.split("#", 1)[1]
+            raw_rows.append(
+                {
+                    "ts": row.ts.isoformat(),
+                    "ch": ch_osw_id,
+                    "data": data,
+                }
+            )
+        await self.archive_database.write_tool_channel_raw(
+            TSDCMixin.WriteToolChannelRawParams(
+                tool_osw_id=params.tool_osw_id,
+                data=raw_rows,
+            )
+        )
+
+    class ReadTypedDataParams(BaseModel):
+        """Parameters for read_typed_data."""
+
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        tool_osw_id: str
+        channel: Any = None
+        target_schema: Any = None  # Class to deserialize into
+        start: Optional[dt.datetime] = None
+        end: Optional[dt.datetime] = None
+        limit: Optional[int] = None
+
+    async def read_typed_data(self, params: "DataToolMixin.ReadTypedDataParams"):
+        """Read data and deserialize using channel characteristics.
+
+        Resolution priority for the target class:
+        1. params.target_schema (explicit override)
+        2. 'type' field in stored data (IRI-based, future)
+        3. Channel's characteristic (must be a class)
+
+        Returns a list of deserialized Characteristic instances.
+        """
+        if self.archive_database is None:
+            raise ValueError("No archive database configured")
+        ch_osw_id = None
+        if params.channel:
+            ch_osw_id = params.channel.get_osw_id()
+            if "#" in ch_osw_id:
+                ch_osw_id = ch_osw_id.split("#", 1)[1]
+        raw = await self.archive_database.read_tool_channel_raw(
+            TSDCMixin.ReadToolChannelRawParams(
+                tool_osw_id=params.tool_osw_id,
+                channel_osw_id=ch_osw_id,
+                start=params.start,
+                end=params.end,
+                limit=params.limit,
+            )
+        )
+        ch_dict = {}
+        for ch in self.get_all_channels():
+            _id = ch.get_osw_id()
+            if "#" in _id:
+                _id = _id.split("#", 1)[1]
+            ch_dict[_id] = ch
+
+        results = []
+        for row in raw:
+            data = row["data"]
+            ch = params.channel or ch_dict.get(row["ch"])
+            cls = params.target_schema
+            # Resolve from stored type IRI in data
+            if cls is None and isinstance(data, dict) and "type" in data:
+                from oold.model import _types
+
+                type_iri = data["type"]
+                if isinstance(type_iri, list):
+                    type_iri = type_iri[0]
+                cls = _types.get(type_iri)
+            # Resolve from channel's characteristic IRI via registry
+            if cls is None and ch is not None:
+                from oold.model import _types
+
+                char_iris = getattr(ch, "__iris__", {}).get("characteristic", [])
+                if isinstance(char_iris, str):
+                    char_iris = [char_iris]
+                for iri in char_iris:
+                    cls = _types.get(iri)
+                    if cls is not None:
+                        break
+            if cls is None:
+                raise ValueError(
+                    f"Cannot determine schema for channel "
+                    f"{row['ch']}. Set characteristic on the "
+                    f"channel or pass target_schema."
+                )
+            results.append(cls.from_json(data))
+        return results
+
     async def stop(self):
         _logger.warning("Stopping")
         if self.archive_database is not None:
             await self.archive_database.flush_buffer()
 
 
-class TSDCMixin:
+class TSDCMixin(BaseController):
     """Mixin providing TimeSeriesDatabaseController methods and inner types.
 
     Compose with a Database model class to create a concrete controller:
