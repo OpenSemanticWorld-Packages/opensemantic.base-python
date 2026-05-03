@@ -374,3 +374,200 @@ def test_datatool_controller_subobject_ids():
     parent_osw = dt.get_osw_id()
     ch_osw = dt.data_channels[0].osw_id
     assert ch_osw.startswith(parent_osw + "#")
+
+
+def test_datatool_controller_auto_archive_from_storage():
+    from opensemantic.base import Database, DataToolController
+
+    db = Database(name="auto_archive_test", label=[Label(text="Archive")])
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        storage_locations=[db],
+        auto_archive=True,
+    )
+    assert dt.archive_database is not None
+    assert dt.archive_database.name == "auto_archive_test"
+    import os
+
+    db_path = dt.archive_database.db_path
+    if os.path.exists(db_path):
+        os.unlink(db_path)
+
+
+def test_datatool_controller_explicit_archive_not_overwritten():
+    from opensemantic.base import Database, DataToolController
+
+    db = Database(name="ignored", label=[Label(text="Ignored")])
+    explicit = LocalTimeSeriesDatabaseController(
+        name="explicit",
+        label=[Label(text="Explicit")],
+        db_path="./explicit_test.sqlite",
+    )
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        storage_locations=[db],
+        archive_database=explicit,
+        auto_archive=True,
+    )
+    assert dt.archive_database.name == "explicit"
+
+
+def test_datatool_controller_handle_data_change():
+    """Test _handle_data_change archives data correctly."""
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._model import DataChannel
+
+    ch = DataChannel(uuid=str(uuid4()), osw_id="ch1", name="ch1")
+    archive = LocalTimeSeriesDatabaseController(
+        name="hdc_test",
+        label=[Label(text="Test")],
+        db_path="./hdc_test.sqlite",
+    )
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        data_channels=[ch],
+        archive_database=archive,
+        auto_archive=True,
+    )
+
+    import datetime
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    async def _test():
+        await archive.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id=dt.get_osw_id())
+        )
+        from opensemantic.base._controller_mixin import DataToolMixin
+
+        await dt._handle_data_change(
+            DataToolMixin.ChannelDataChangeNotificationParams(
+                channel=dt.data_channels[0],
+                value=42.0,
+                timestamp=now,
+            )
+        )
+        rows = await archive.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(
+                tool_osw_id=dt.get_osw_id()
+            )
+        )
+        assert len(rows) == 1
+        assert rows[0]["data"]["value"] == 42.0
+
+    asyncio.run(_test())
+
+    import os
+
+    if os.path.exists("./hdc_test.sqlite"):
+        os.unlink("./hdc_test.sqlite")
+
+
+def test_datatool_controller_typed_write_read():
+    """Test typed write/read with Temperature characteristic."""
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._controller_mixin import DataToolMixin, TSDCMixin
+    from opensemantic.base._model import DataChannel
+    from opensemantic.characteristics.quantitative import (
+        Temperature,
+        TemperatureUnit,
+    )
+
+    ch = DataChannel(
+        uuid=str(uuid4()),
+        osw_id="ch_typed",
+        name="typed_ch",
+        characteristic=Temperature.get_cls_iri(),
+    )
+    archive = LocalTimeSeriesDatabaseController(
+        name="typed_base_test",
+        label=[Label(text="Test")],
+        db_path="./typed_base_test.sqlite",
+    )
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        data_channels=[ch],
+        archive_database=archive,
+    )
+
+    import datetime
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    async def _test():
+        await archive.create_tool(
+            TSDCMixin.CreateToolParams(tool_osw_id=dt.get_osw_id())
+        )
+        await dt.store_typed_data(
+            DataToolMixin.StoreTypedDataParams(
+                tool_osw_id=dt.get_osw_id(),
+                rows=[
+                    DataToolMixin.TypedDataRow(
+                        ts=now,
+                        channel=dt.data_channels[0],
+                        value=Temperature(
+                            value=300.0,
+                            unit=TemperatureUnit.kelvin,
+                        ),
+                    ),
+                ],
+            )
+        )
+        results = await dt.read_typed_data(
+            DataToolMixin.ReadTypedDataParams(
+                tool_osw_id=dt.get_osw_id(),
+                channel=dt.data_channels[0],
+            )
+        )
+        assert len(results) == 1
+        assert isinstance(results[0], Temperature)
+        assert results[0].value == pytest.approx(300.0)
+
+    asyncio.run(_test())
+
+    import os
+
+    if os.path.exists("./typed_base_test.sqlite"):
+        os.unlink("./typed_base_test.sqlite")
+
+
+def test_datatool_controller_configure_auto_archive():
+    """Test configure_auto_archive creates tool tables."""
+    from uuid import uuid4
+
+    from opensemantic.base import DataToolController
+    from opensemantic.base._controller_mixin import DataToolMixin
+    from opensemantic.base._model import DataChannel
+
+    ch = DataChannel(uuid=str(uuid4()), osw_id="ch1", name="ch1")
+    archive = LocalTimeSeriesDatabaseController(
+        name="cfg_test",
+        label=[Label(text="Test")],
+        db_path="./cfg_test.sqlite",
+    )
+    dt = DataToolController(
+        name="test",
+        label=[Label(text="Test")],
+        data_channels=[ch],
+        archive_database=archive,
+    )
+
+    async def _test():
+        await dt.configure_auto_archive(DataToolMixin.AutoArchiveParams(enable=True))
+        tools = await archive.get_tools_list()
+        assert dt.get_osw_id() in tools
+
+    asyncio.run(_test())
+
+    import os
+
+    if os.path.exists("./cfg_test.sqlite"):
+        os.unlink("./cfg_test.sqlite")
