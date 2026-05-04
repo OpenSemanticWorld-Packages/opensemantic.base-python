@@ -294,7 +294,7 @@ def test_local_db_jsonb_filter(sqlite_db):
                 tool_osw_id="OSW_jb",
                 filter=[
                     TimeSeriesDatabaseController.Filter(
-                        column="data->>'value.nested'",
+                        column="json_extract(data, '$.value.nested')",
                         operator=TimeSeriesDatabaseController.FilterOperator.eq,
                         criteria=43,
                     )
