@@ -1,3 +1,7 @@
+# Environment files (may contain secrets)
+.env
+tests/.env
+
 # Temporary and binary files
 *~
 *.py[cod]

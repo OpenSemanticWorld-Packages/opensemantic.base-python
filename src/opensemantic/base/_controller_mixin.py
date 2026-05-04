@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
 from oold.model import BaseController
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field
 
 from opensemantic.base._controller_logic import (
     build_sqlite_read_query,
@@ -867,7 +867,7 @@ class PostgrestTSDCMixin:
     _offline: bool = False
     _client: Optional[Any] = None
     _buffer: Dict[str, List[Dict]] = {}
-    _buffer_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+    _buffer_lock: asyncio.Lock = None
     _emulate_offline: bool = False
     _local_db: Optional[Any] = None
 
@@ -1051,6 +1051,8 @@ class PostgrestTSDCMixin:
 
     async def write_tool_channel_raw(self, params: TSDCMixin.WriteToolChannelRawParams):
         if self.buffered:
+            if self._buffer_lock is None:
+                self._buffer_lock = asyncio.Lock()
             async with self._buffer_lock:
                 if params.tool_osw_id not in self._buffer:
                     self._buffer[params.tool_osw_id] = []

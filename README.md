@@ -100,3 +100,15 @@ await db.read_tool_channel_raw(params)
 pip install opensemantic.base            # models only
 pip install opensemantic.base[controller] # + aiosqlite, postgrest
 ```
+
+## Testing
+
+```bash
+pytest tests/test_controller.py
+```
+
+PostgREST integration tests require a running [pgstack](https://github.com/opensemanticworld/pgstack) instance. To enable them:
+
+1. Start pgstack: `docker compose -f docker-compose.yml -f docker-compose.example-tsdb.override.yml up -d`
+2. Copy `tests/.env.example` to `tests/.env` and fill in `TEST_PGRST_URL` and `TEST_PGRST_JWT_SECRET`
+3. Run tests - PostgREST tests are skipped unless both env vars are set

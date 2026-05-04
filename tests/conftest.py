@@ -1,10 +1,18 @@
-"""
-Dummy conftest.py for base.
+"""conftest.py for opensemantic.base tests.
 
-If you don't know what this is for, just leave it empty.
-Read more about conftest.py under:
-- https://docs.pytest.org/en/stable/fixture.html
-- https://docs.pytest.org/en/stable/writing_plugins.html
+Loads environment variables from tests/.env if present.
+Users can either:
+  - Copy tests/.env.example to tests/.env and fill in values
+  - Set env vars directly (shell, CI, IDE)
 """
 
-# import pytest
+from pathlib import Path
+
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_env_path)
+    except ImportError:
+        pass

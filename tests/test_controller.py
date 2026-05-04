@@ -213,6 +213,360 @@ def test_local_db_get_table_size(sqlite_db):
     asyncio.run(_test())
 
 
+def test_local_db_timestamp_range_filter(sqlite_db):
+    """Test reading with start/end timestamp filters."""
+
+    async def _test():
+        await sqlite_db.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id="OSW_tr")
+        )
+        await sqlite_db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id="OSW_tr",
+                data=[
+                    {
+                        "ts": "2024-01-01T12:00:00.000+00:00",
+                        "ch": "ch1",
+                        "data": {"value": 1},
+                    },
+                    {
+                        "ts": "2024-01-01T12:00:00.100+00:00",
+                        "ch": "ch1",
+                        "data": {"value": 2},
+                    },
+                    {
+                        "ts": "2024-01-01T12:00:01.000+00:00",
+                        "ch": "ch1",
+                        "data": {"value": 3},
+                    },
+                ],
+            )
+        )
+        # Full range
+        rows = await sqlite_db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(
+                tool_osw_id="OSW_tr",
+                start="2024-01-01T12:00:00.000Z",
+                end="2024-01-01T12:00:00.999Z",
+            )
+        )
+        assert len(rows) == 2
+
+        # Narrow range
+        rows = await sqlite_db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(
+                tool_osw_id="OSW_tr",
+                start="2024-01-01T12:00:00.000Z",
+                end="2024-01-01T12:00:00.050Z",
+            )
+        )
+        assert len(rows) == 1
+
+    asyncio.run(_test())
+
+
+def test_local_db_jsonb_filter(sqlite_db):
+    """Test reading with JSONB column filter."""
+
+    async def _test():
+        await sqlite_db.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id="OSW_jb")
+        )
+        await sqlite_db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id="OSW_jb",
+                data=[
+                    {
+                        "ts": "2024-01-01T12:00:00.000+00:00",
+                        "ch": "ch1",
+                        "data": {"value": 42},
+                    },
+                    {
+                        "ts": "2024-01-01T12:00:00.100+00:00",
+                        "ch": "ch1",
+                        "data": {"value": {"nested": 43}},
+                    },
+                ],
+            )
+        )
+        rows = await sqlite_db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(
+                tool_osw_id="OSW_jb",
+                filter=[
+                    TimeSeriesDatabaseController.Filter(
+                        column="data->>'value.nested'",
+                        operator=TimeSeriesDatabaseController.FilterOperator.eq,
+                        criteria=43,
+                    )
+                ],
+            )
+        )
+        assert len(rows) == 1
+
+    asyncio.run(_test())
+
+
+def test_local_db_delete_by_ids(sqlite_db):
+    """Test deleting specific rows by ID."""
+
+    async def _test():
+        await sqlite_db.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id="OSW_dbi")
+        )
+        await sqlite_db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id="OSW_dbi",
+                data=[
+                    {"ts": "2024-01-01T00:00:00", "ch": "c", "data": {"v": 1}},
+                    {"ts": "2024-01-01T00:00:01", "ch": "c", "data": {"v": 2}},
+                ],
+            )
+        )
+        rows = await sqlite_db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(tool_osw_id="OSW_dbi")
+        )
+        assert len(rows) == 2
+        ids = [row["id"] for row in rows]
+        await sqlite_db.delete_by_ids("OSW_dbi", ids)
+        rows = await sqlite_db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(tool_osw_id="OSW_dbi")
+        )
+        assert len(rows) == 0
+
+    asyncio.run(_test())
+
+
+def test_local_db_periodic_cleanup(sqlite_db):
+    """Test concurrent write + periodic cleanup."""
+    import datetime
+
+    async def _test():
+        tool = "OSW_cleanup"
+        await sqlite_db.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id=tool)
+        )
+
+        async def writer():
+            for i in range(20):
+                ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                await sqlite_db.write_tool_channel_raw(
+                    TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                        tool_osw_id=tool,
+                        data=[{"ts": ts, "ch": "ch1", "data": {"value": i}}],
+                    )
+                )
+                await asyncio.sleep(0.05)
+
+        async def cleanup():
+            while True:
+                rows = await sqlite_db.read_tool_channel_raw(
+                    TimeSeriesDatabaseController.ReadToolChannelRawParams(
+                        tool_osw_id=tool, limit=5
+                    )
+                )
+                if rows:
+                    ids = [row["id"] for row in rows]
+                    await sqlite_db.delete_by_ids(tool, ids)
+                await asyncio.sleep(0.2)
+
+        writer_task = asyncio.create_task(writer())
+        cleanup_task = asyncio.create_task(cleanup())
+
+        await writer_task
+        await asyncio.sleep(3)
+
+        if cleanup_task.done() and cleanup_task.exception():
+            raise cleanup_task.exception()
+        cleanup_task.cancel()
+
+        rows = await sqlite_db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(tool_osw_id=tool)
+        )
+        assert len(rows) == 0, f"Expected 0 rows after cleanup, got {len(rows)}"
+
+    asyncio.run(_test())
+
+
+# -- PostgREST integration tests --
+# These require a running PostgREST instance (pgstack).
+# Set TEST_PGRST_URL and TEST_PGRST_JWT_SECRET env vars to enable.
+# See .env.example for configuration.
+
+_PGRST_URL = os.environ.get("TEST_PGRST_URL")
+_PGRST_JWT_SECRET = os.environ.get("TEST_PGRST_JWT_SECRET")
+_PGRST_JWT_ROLE = os.environ.get("TEST_PGRST_JWT_ROLE", "api_user")
+_PGRST_SCHEMA = os.environ.get("TEST_PGRST_SCHEMA", "api")
+_PGRST_CONFIGURED = bool(_PGRST_URL and _PGRST_JWT_SECRET)
+
+
+def _get_postgrest_db(buffered=False, **kwargs):
+    """Create a PostgrestTimeSeriesDatabaseController from env vars."""
+    import jwt
+    from postgrest import AsyncPostgrestClient
+
+    from opensemantic.base import PostgrestTimeSeriesDatabaseController
+
+    token = jwt.encode({"role": _PGRST_JWT_ROLE}, _PGRST_JWT_SECRET, algorithm="HS256")
+    client = AsyncPostgrestClient(
+        base_url=_PGRST_URL,
+        schema=_PGRST_SCHEMA,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    db = PostgrestTimeSeriesDatabaseController(
+        name="pgrst_test",
+        label=[Label(text="PostgREST Test")],
+        buffered=buffered,
+        **kwargs,
+    )
+    db.set_client(client)
+    return db
+
+
+@pytest.mark.skipif(
+    not _PGRST_CONFIGURED,
+    reason="TEST_PGRST_URL and TEST_PGRST_JWT_SECRET not set",
+)
+def test_postgrest_crud():
+    """Full CRUD cycle via PostgREST."""
+
+    async def _test():
+        db = _get_postgrest_db()
+        tool_id = "OSWaad8e2eaa5b0412da008182386ebab68"
+        ch_id = "OSWaad1e2eaa5b0412da008182386ebab68"
+
+        # Clean up if exists
+        tools = await db.get_tools_list()
+        if tool_id in tools:
+            await db.delete_tool(
+                TimeSeriesDatabaseController.DeleteToolParams(tool_osw_id=tool_id)
+            )
+
+        # Create
+        c_res = await db.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id=tool_id)
+        )
+        assert tool_id in c_res.data
+        tools = await db.get_tools_list()
+        assert tool_id in tools
+        await asyncio.sleep(1.0)
+
+        # Write
+        data_rows = [
+            {"ts": "2023-10-01T12:00:00Z", "ch": ch_id, "data": {"value": 23.4}}
+        ]
+        await db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id=tool_id, data=data_rows
+            )
+        )
+
+        # Read
+        loaded = await db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(tool_osw_id=tool_id)
+        )
+        assert len(loaded) == 1
+        assert loaded[0]["data"]["value"] == 23.4
+
+        # JSONB filter
+        res = (
+            await db._client.table(tool_id)
+            .select("*")
+            .filter("data->>value", "eq", 23.4)
+            .execute()
+        )
+        assert len(res.data) == 1
+
+        # Tool config
+        tool_config = await db.get_tool_config()
+        assert any(t["osw_id"] == tool_id for t in tool_config)
+
+        # Delete
+        d_res = await db.delete_tool(
+            TimeSeriesDatabaseController.DeleteToolParams(tool_osw_id=tool_id)
+        )
+        assert tool_id in d_res.data
+        tools = await db.get_tools_list()
+        assert tool_id not in tools
+
+    asyncio.run(_test())
+
+
+@pytest.mark.skipif(
+    not _PGRST_CONFIGURED,
+    reason="TEST_PGRST_URL and TEST_PGRST_JWT_SECRET not set",
+)
+def test_postgrest_offline_buffer():
+    """Offline buffer + sync."""
+
+    async def _test():
+        db = _get_postgrest_db(buffered=True, buffer_batch_size=1)
+
+        tool_id = "OSWbad8e2eaa5b0412da008182386ebab68"
+        ch_id = "OSWbad1e2eaa5b0412da008182386ebab68"
+
+        # Clean up
+        tools = await db.get_tools_list()
+        if tool_id in tools:
+            await db.delete_tool(
+                TimeSeriesDatabaseController.DeleteToolParams(tool_osw_id=tool_id)
+            )
+
+        await db.create_tool(
+            TimeSeriesDatabaseController.CreateToolParams(tool_osw_id=tool_id)
+        )
+        await asyncio.sleep(1.0)
+
+        # Write online
+        await db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id=tool_id,
+                data=[
+                    {"ts": "2023-10-01T12:00:00Z", "ch": ch_id, "data": {"value": 23.4}}
+                ],
+            )
+        )
+
+        # Go offline
+        db._emulate_offline = True
+        await db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id=tool_id,
+                data=[
+                    {"ts": "2023-10-01T12:05:00Z", "ch": ch_id, "data": {"value": 25.6}}
+                ],
+            )
+        )
+
+        # Come back online
+        db._emulate_offline = False
+        await db.write_tool_channel_raw(
+            TimeSeriesDatabaseController.WriteToolChannelRawParams(
+                tool_osw_id=tool_id,
+                data=[
+                    {"ts": "2023-10-01T12:10:00Z", "ch": ch_id, "data": {"value": 27.8}}
+                ],
+            )
+        )
+
+        # Wait for offline buffer sync
+        await asyncio.sleep(5.0)
+
+        loaded = await db.read_tool_channel_raw(
+            TimeSeriesDatabaseController.ReadToolChannelRawParams(tool_osw_id=tool_id)
+        )
+        values = [row["data"]["value"] for row in loaded]
+        assert 23.4 in values, "Online write missing"
+        assert 25.6 in values, "Offline buffered write missing"
+        assert 27.8 in values, "Post-offline write missing"
+
+        # Cleanup
+        await db.delete_tool(
+            TimeSeriesDatabaseController.DeleteToolParams(tool_osw_id=tool_id)
+        )
+
+    asyncio.run(_test())
+
+
 # -- v1 controller tests --
 
 
