@@ -58,11 +58,11 @@ class DataToolMixin(BaseController):
         if self.auto_archive and _needs_init and _storage:
             self.archive_database = self._init_archive_database(_storage[0])
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name, value, internal=False):
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            super().__setattr__(name, value)
+            super().__setattr__(name, value, internal=internal)
 
     # get_osw_id() and get_iri() are inherited from OswBaseModel
     # via the model base class (DataTool -> Entity -> OswBaseModel)
