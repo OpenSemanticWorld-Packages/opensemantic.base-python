@@ -925,3 +925,241 @@ def test_datatool_controller_configure_auto_archive():
 
     if os.path.exists("./cfg_test.sqlite"):
         os.unlink("./cfg_test.sqlite")
+
+
+# -- store_channel_data / load_channel_data tests --
+
+
+def _make_controller_with_channels():
+    """Helper: create a DataToolController with temp + pressure channels."""
+    from uuid import NAMESPACE_URL, uuid5
+
+    from opensemantic import compute_scoped_uuid
+    from opensemantic.base.v1 import (
+        Database,
+        DataChannel,
+        DataTool,
+        DataToolController,
+    )
+    from opensemantic.characteristics.quantitative.v1 import Temperature
+    from opensemantic.core.v1 import Label as LabelV1
+
+    parent_uuid = uuid5(NAMESPACE_URL, "store_load_test")
+    dt = DataTool(
+        uuid=parent_uuid,
+        name="StoreLoadTest",
+        label=[LabelV1(text="Test")],
+        data_channels=[
+            DataChannel(
+                uuid=str(compute_scoped_uuid(parent_uuid, "temp")),
+                osw_id="placeholder",
+                name="temperature",
+                label=[LabelV1(text="Temp")],
+                characteristic=Temperature.get_cls_iri(),
+            ),
+            DataChannel(
+                uuid=str(compute_scoped_uuid(parent_uuid, "press")),
+                osw_id="placeholder",
+                name="pressure",
+                label=[LabelV1(text="Press")],
+            ),
+        ],
+        storage_locations=[
+            Database(name="test_archive", label=[LabelV1(text="Archive")]),
+        ],
+    )
+    ctrl = DataToolController(dt, auto_archive=True)
+    return ctrl
+
+
+def test_store_channel_data_by_name():
+    """Store by channel name string, load raw from pressure (no characteristic)."""
+    import datetime
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # Use pressure channel (no characteristic) so load returns raw dict
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="pressure",
+                value={"value": 23.5},
+                timestamp=now,
+            )
+        )
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="pressure")
+        )
+        assert len(results) == 1
+        assert results[0]["value"] == 23.5
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_store_channel_data_typed():
+    """Store Temperature instance, verify base unit conversion."""
+    import datetime
+
+    from opensemantic.characteristics.quantitative.v1 import (
+        Temperature,
+        TemperatureUnit,
+    )
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="temperature",
+                value=Temperature(value=300.0, unit=TemperatureUnit.kelvin),
+                timestamp=now,
+            )
+        )
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(
+                channel="temperature",
+                target_schema=Temperature,
+            )
+        )
+        assert len(results) == 1
+        assert isinstance(results[0], Temperature)
+        assert results[0].value == pytest.approx(300.0)
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_load_channel_data_auto_typed():
+    """Load without target_schema, auto-resolve from channel characteristic."""
+    import datetime
+
+    from opensemantic.characteristics.quantitative.v1 import Temperature
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="temperature",
+                value=Temperature(value=295.0),
+                timestamp=now,
+            )
+        )
+        # No target_schema - should resolve from characteristic IRI
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="temperature")
+        )
+        assert len(results) == 1
+        # Auto-resolved class may be v2 Temperature from _types registry
+        assert hasattr(results[0], "value")
+        assert results[0].value == pytest.approx(295.0)
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_load_channel_data_raw():
+    """Load channel without characteristic returns raw dicts."""
+    import datetime
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="pressure",
+                value={"value": 1013.25, "unit": "hPa"},
+                timestamp=now,
+            )
+        )
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="pressure")
+        )
+        assert len(results) == 1
+        assert isinstance(results[0], dict)
+        assert results[0]["value"] == 1013.25
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_auto_create_table_on_first_write():
+    """No manual create_tool needed - table auto-created on first write."""
+    import datetime
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        # No create_tool call - should work anyway
+        now = datetime.datetime.now(datetime.timezone.utc)
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="temperature",
+                value={"value": 20.0},
+                timestamp=now,
+            )
+        )
+        tools = await ctrl.archive_database.get_tools_list()
+        assert ctrl.get_osw_id() in tools
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_channel_name_not_found():
+    """Raises ValueError for unknown channel name."""
+    ctrl = _make_controller_with_channels()
+    with pytest.raises(ValueError, match="No channel named"):
+        ctrl.get_channel_by_name("nonexistent")
+    _cleanup_archive(ctrl)
+
+
+def test_store_load_roundtrip():
+    """Store typed, load typed, verify equality."""
+    import datetime
+
+    from opensemantic.characteristics.quantitative.v1 import (
+        Temperature,
+        TemperatureUnit,
+    )
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        original = Temperature(value=298.15, unit=TemperatureUnit.kelvin)
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="temperature",
+                value=original,
+                timestamp=now,
+            )
+        )
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(
+                channel="temperature",
+                target_schema=Temperature,
+            )
+        )
+        assert len(results) == 1
+        loaded = results[0]
+        assert loaded.value == pytest.approx(original.value)
+        assert loaded.unit == original.unit
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def _cleanup_archive(ctrl):
+    """Clean up SQLite file created by auto-init."""
+    import os
+    from pathlib import Path
+
+    db_path = getattr(ctrl.archive_database, "db_path", None)
+    if db_path and Path(db_path).exists():
+        os.unlink(db_path)

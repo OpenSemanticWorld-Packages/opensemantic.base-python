@@ -37,8 +37,8 @@ class DataToolMixin(BaseController):
         class DataToolController(DataToolMixin, DataTool): pass
     """
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    def __init__(self, *args, **data):
+        super().__init__(*args, **data)
         self._compute_subobject_ids()
         if not isinstance(getattr(self, "_channel_dict", None), dict):
             object.__setattr__(self, "_channel_dict", {})
@@ -52,17 +52,11 @@ class DataToolMixin(BaseController):
         # so it survives serialization. Currently url is controller-only.
 
         # Auto-init archive database from storage_locations
-        # Also re-init if archive_database is a raw dict (from deserialization)
         _archive_db = getattr(self, "archive_database", None)
         _needs_init = _archive_db is None or isinstance(_archive_db, dict)
-        if (
-            self.auto_archive
-            and _needs_init
-            and getattr(self, "storage_locations", None)
-        ):
-            self.archive_database = self._init_archive_database(
-                self.storage_locations[0]
-            )
+        _storage = getattr(self, "storage_locations", None)
+        if self.auto_archive and _needs_init and _storage:
+            self.archive_database = self._init_archive_database(_storage[0])
 
     def __setattr__(self, name, value):
         if name.startswith("_"):
@@ -295,7 +289,46 @@ class DataToolMixin(BaseController):
             f"not found in any device controller"
         )
 
+    def get_channel_by_name(self, name: str):
+        """Look up a channel by name across self and all subdevices.
+
+        Raises ValueError if no channel with the given name is found.
+        """
+        for ch in self.get_all_channels():
+            if ch.name == name:
+                return ch
+        raise ValueError(
+            f"No channel named '{name}' found. "
+            f"Available: {[ch.name for ch in self.get_all_channels()]}"
+        )
+
+    def _resolve_channel(self, channel):
+        """Resolve a channel argument: pass through if already an object,
+        look up by name if string."""
+        if isinstance(channel, str):
+            return self.get_channel_by_name(channel)
+        return channel
+
     # -- Inner param/result classes --
+
+    class StoreChannelDataParams(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        channel: Any = None
+        """DataChannel instance or channel name (str)."""
+        value: Any = None
+        """Raw dict/scalar or Characteristic instance."""
+        timestamp: Optional[dt.datetime] = None
+        """Timestamp for the data point. Defaults to now(UTC)."""
+
+    class LoadChannelDataParams(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        channel: Any = None
+        """DataChannel instance, channel name (str), or None (all)."""
+        start: Optional[dt.datetime] = None
+        end: Optional[dt.datetime] = None
+        limit: Optional[int] = None
+        target_schema: Any = None
+        """Class for typed deserialization (e.g. Temperature)."""
 
     class ChannelDataChangeNotificationParams(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -423,9 +456,14 @@ class DataToolMixin(BaseController):
             raise ValueError("No archive database configured")
         if params is None:
             params = type(self).ReadArchiveDataParams()
+        ch_osw_id = None
+        if params.channel:
+            ch_osw_id = params.channel.get_osw_id()
+            if "#" in ch_osw_id:
+                ch_osw_id = ch_osw_id.split("#")[-1]
         _params = TSDCMixin.ReadToolChannelRawParams(
             tool_osw_id=self.get_osw_id(),
-            channel_osw_id=params.channel.get_osw_id() if params.channel else None,
+            channel_osw_id=ch_osw_id,
             start=params.start,
             end=params.end,
             limit=params.max_rows,
@@ -583,6 +621,129 @@ class DataToolMixin(BaseController):
         _logger.warning("Stopping")
         if self.archive_database is not None:
             await self.archive_database.flush_buffer()
+
+    # -- High-level store/load API --
+
+    async def store_channel_data(self, params: "DataToolMixin.StoreChannelDataParams"):
+        """Store a single channel value to the archive database.
+
+        Resolves channel by name if a string is passed.
+        If value is a Characteristic instance, converts to base unit
+        and serializes. Otherwise stores as raw dict/scalar.
+        Auto-creates the tool table on first write (for SQLite).
+        """
+        if self.archive_database is None:
+            raise ValueError("No archive database configured")
+        channel = self._resolve_channel(params.channel)
+        ts = params.timestamp or dt.datetime.now(dt.timezone.utc)
+        value = params.value
+
+        # Typed value: convert to base unit and serialize
+        if hasattr(value, "to_json"):
+            if hasattr(value, "to_base"):
+                try:
+                    value = value.to_base()
+                except Exception:
+                    pass
+            data = value.to_json(exclude_defaults=True)
+        elif isinstance(value, dict):
+            data = value
+        else:
+            data = {"value": value}
+
+        ch_osw_id = channel.get_osw_id()
+        if "#" in ch_osw_id:
+            ch_osw_id = ch_osw_id.split("#")[-1]
+        tool_osw_id = self.get_osw_id()
+
+        await self.archive_database.write_tool_channel_raw(
+            TSDCMixin.WriteToolChannelRawParams(
+                tool_osw_id=tool_osw_id,
+                data=[
+                    {
+                        "ts": ts.isoformat(),
+                        "ch": ch_osw_id,
+                        "data": data,
+                    }
+                ],
+            )
+        )
+
+    async def load_channel_data(self, params: "DataToolMixin.LoadChannelDataParams"):
+        """Load channel data from the archive database.
+
+        Resolves channel by name if a string is passed.
+        If target_schema is set, deserializes via from_json().
+        If channel has a characteristic, resolves class via _types.
+        Otherwise returns raw dicts.
+        """
+        if self.archive_database is None:
+            raise ValueError("No archive database configured")
+        channel = (
+            self._resolve_channel(params.channel)
+            if params.channel is not None
+            else None
+        )
+        ch_osw_id = None
+        if channel is not None:
+            ch_osw_id = channel.get_osw_id()
+            if "#" in ch_osw_id:
+                ch_osw_id = ch_osw_id.split("#")[-1]
+
+        raw = await self.archive_database.read_tool_channel_raw(
+            TSDCMixin.ReadToolChannelRawParams(
+                tool_osw_id=self.get_osw_id(),
+                channel_osw_id=ch_osw_id,
+                start=params.start,
+                end=params.end,
+                limit=params.limit,
+            )
+        )
+
+        # Determine deserialization class
+        cls = params.target_schema
+        if cls is None and channel is not None:
+            cls = self._resolve_characteristic_class(channel)
+
+        if cls is not None:
+            return [cls.from_json(row["data"]) for row in raw]
+        return [row["data"] for row in raw]
+
+    def _resolve_characteristic_class(self, channel):
+        """Try to resolve the characteristic class for a channel.
+
+        Checks __iris__ for the characteristic IRI (avoids triggering
+        backend resolution), then looks up the class in the _types registry.
+        Returns the class or None.
+        """
+        # Get IRI from __iris__ (avoids backend resolution via __getattribute__)
+        iris = getattr(channel, "__iris__", {})
+        char_iri = iris.get("characteristic")
+        if char_iri is None:
+            # Fall back to direct attribute (may trigger backend)
+            try:
+                char_iri = getattr(channel, "characteristic", None)
+            except (ValueError, ImportError):
+                return None
+        if char_iri is None:
+            return None
+        # Handle list of IRIs (take first)
+        if isinstance(char_iri, list):
+            char_iri = char_iri[0] if char_iri else None
+        if char_iri is None:
+            return None
+        # If it's already a class, return it
+        if isinstance(char_iri, type) and hasattr(char_iri, "from_json"):
+            return char_iri
+        # Look up IRI string in the _types registry
+        if isinstance(char_iri, str):
+            try:
+                from oold.model import _types
+
+                return _types.get(char_iri)
+            except ImportError:
+                return None
+        return None
 
 
 class TSDCMixin(BaseController):
@@ -798,6 +959,10 @@ class LocalTSDCMixin:
         return [row[0] for row in rows]
 
     async def write_tool_channel_raw(self, params: TSDCMixin.WriteToolChannelRawParams):
+        # Auto-create table on first write (CREATE TABLE IF NOT EXISTS is idempotent)
+        await self.create_tool(
+            TSDCMixin.CreateToolParams(tool_osw_id=params.tool_osw_id)
+        )
         data = [(row["ts"], row["ch"], json.dumps(row["data"])) for row in params.data]
         await self.execute_many(
             f"INSERT INTO {params.tool_osw_id} "
