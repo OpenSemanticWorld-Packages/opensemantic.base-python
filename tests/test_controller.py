@@ -1156,6 +1156,65 @@ def test_store_load_roundtrip():
     _cleanup_archive(ctrl)
 
 
+def test_v2_datatool_store_load_auto_typed():
+    """v2 DataToolController: store + load with auto-typed resolution."""
+    import datetime
+    from uuid import uuid4 as _uuid4
+
+    from opensemantic import compute_scoped_uuid
+    from opensemantic.base import (
+        DataChannel,
+        DataTool,
+        DataToolController,
+        LocalTimeSeriesDatabaseController,
+    )
+    from opensemantic.characteristics.quantitative import Temperature
+    from opensemantic.core import Label
+
+    parent = _uuid4()
+    dt = DataTool(
+        uuid=parent,
+        name="V2Test",
+        label=[Label(text="V2")],
+        data_channels=[
+            DataChannel(
+                uuid=str(compute_scoped_uuid(parent, "temp")),
+                osw_id="placeholder",
+                name="temperature",
+                label=[Label(text="Temp")],
+                characteristic=Temperature.get_cls_iri(),
+            ),
+        ],
+    )
+    archive = LocalTimeSeriesDatabaseController(
+        name="v2test",
+        label=[Label(text="V2 Archive")],
+        db_path="./v2test.sqlite",
+    )
+    ctrl = DataToolController(dt)
+    ctrl.archive_database = archive
+    ctrl.auto_archive = True
+
+    async def _test():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        await ctrl.store_channel_data(
+            ctrl.StoreChannelDataParams(
+                channel="temperature",
+                value=Temperature(value=300.0),
+                timestamp=now,
+            )
+        )
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="temperature")
+        )
+        assert len(results) == 1
+        assert hasattr(results[0], "value")
+        assert results[0].value == pytest.approx(300.0)
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
 def _cleanup_archive(ctrl):
     """Clean up SQLite file created by auto-init."""
     import os

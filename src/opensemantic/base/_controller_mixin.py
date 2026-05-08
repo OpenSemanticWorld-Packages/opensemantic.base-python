@@ -377,10 +377,7 @@ class DataToolMixin(BaseController):
             if owner.auto_archive:
                 try:
                     tool_osw_id = owner.get_osw_id()
-                    if isinstance(params.value, dict):
-                        value = json.loads(json.dumps(params.value, default=str))
-                    else:
-                        value = {"value": params.value}
+                    value = self._value_to_store_data(params.value, params.channel)
                     # Use just the channel's own ID (child part of subobject ID)
                     ch_osw_id = params.channel.get_osw_id()
                     if "#" in ch_osw_id:
@@ -617,6 +614,35 @@ class DataToolMixin(BaseController):
             results.append(cls.from_json(data))
         return results
 
+    def _value_to_store_data(self, value, channel):
+        """Convert a value to a dict suitable for DB storage.
+
+        Handles typed (Characteristic), dict, and raw scalar values.
+        For raw scalars, uses channel's characteristic + unit to convert
+        to base unit if available.
+        """
+        if hasattr(value, "to_json"):
+            if hasattr(value, "to_base"):
+                try:
+                    value = value.to_base()
+                except Exception:
+                    pass
+            return value.to_json(exclude_defaults=True)
+        if isinstance(value, dict):
+            return json.loads(json.dumps(value, default=str))
+        # Raw scalar: wrap with channel unit if available
+        cls = self._resolve_characteristic_class(channel)
+        ch_unit = getattr(channel, "unit", None)
+        if cls is not None and ch_unit is not None:
+            typed = cls(value=value, unit=ch_unit)
+            if hasattr(typed, "to_base"):
+                try:
+                    typed = typed.to_base()
+                except Exception:
+                    pass
+            return typed.to_json(exclude_defaults=True)
+        return {"value": value}
+
     async def stop(self):
         _logger.warning("Stopping")
         if self.archive_database is not None:
@@ -638,31 +664,7 @@ class DataToolMixin(BaseController):
         ts = params.timestamp or dt.datetime.now(dt.timezone.utc)
         value = params.value
 
-        # Typed value: convert to base unit and serialize
-        if hasattr(value, "to_json"):
-            if hasattr(value, "to_base"):
-                try:
-                    value = value.to_base()
-                except Exception:
-                    pass
-            data = value.to_json(exclude_defaults=True)
-        elif isinstance(value, dict):
-            data = value
-        else:
-            # Raw scalar: if channel has characteristic + unit,
-            # wrap as typed value, convert to base unit, then serialize
-            cls = self._resolve_characteristic_class(channel)
-            ch_unit = getattr(channel, "unit", None)
-            if cls is not None and ch_unit is not None:
-                typed = cls(value=value, unit=ch_unit)
-                if hasattr(typed, "to_base"):
-                    try:
-                        typed = typed.to_base()
-                    except Exception:
-                        pass
-                data = typed.to_json(exclude_defaults=True)
-            else:
-                data = {"value": value}
+        data = self._value_to_store_data(value, channel)
 
         ch_osw_id = channel.get_osw_id()
         if "#" in ch_osw_id:
