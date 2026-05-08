@@ -931,8 +931,9 @@ def test_datatool_controller_configure_auto_archive():
 
 
 def _make_controller_with_channels():
-    """Helper: create a DataToolController with temp + pressure channels."""
-    from uuid import NAMESPACE_URL, uuid5
+    """Helper: create a DataToolController with temp + pressure channels.
+    Uses a random UUID each time to avoid test interference."""
+    from uuid import uuid4
 
     from opensemantic import compute_scoped_uuid
     from opensemantic.base.v1 import (
@@ -944,7 +945,7 @@ def _make_controller_with_channels():
     from opensemantic.characteristics.quantitative.v1 import Temperature
     from opensemantic.core.v1 import Label as LabelV1
 
-    parent_uuid = uuid5(NAMESPACE_URL, "store_load_test")
+    parent_uuid = uuid4()
     dt = DataTool(
         uuid=parent_uuid,
         name="StoreLoadTest",

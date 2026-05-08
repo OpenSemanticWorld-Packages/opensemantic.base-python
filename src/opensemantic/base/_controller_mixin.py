@@ -649,7 +649,20 @@ class DataToolMixin(BaseController):
         elif isinstance(value, dict):
             data = value
         else:
-            data = {"value": value}
+            # Raw scalar: if channel has characteristic + unit,
+            # wrap as typed value, convert to base unit, then serialize
+            cls = self._resolve_characteristic_class(channel)
+            ch_unit = getattr(channel, "unit", None)
+            if cls is not None and ch_unit is not None:
+                typed = cls(value=value, unit=ch_unit)
+                if hasattr(typed, "to_base"):
+                    try:
+                        typed = typed.to_base()
+                    except Exception:
+                        pass
+                data = typed.to_json(exclude_defaults=True)
+            else:
+                data = {"value": value}
 
         ch_osw_id = channel.get_osw_id()
         if "#" in ch_osw_id:
@@ -706,7 +719,18 @@ class DataToolMixin(BaseController):
             cls = self._resolve_characteristic_class(channel)
 
         if cls is not None:
-            return [cls.from_json(row["data"]) for row in raw]
+            ch_unit = getattr(channel, "unit", None) if channel else None
+            results = []
+            for row in raw:
+                obj = cls.from_json(row["data"])
+                # Convert from base unit to channel's display unit
+                if ch_unit is not None and hasattr(obj, "to_unit"):
+                    try:
+                        obj = obj.to_unit(ch_unit)
+                    except Exception:
+                        pass
+                results.append(obj)
+            return results
         return [row["data"] for row in raw]
 
     def _resolve_characteristic_class(self, channel):
