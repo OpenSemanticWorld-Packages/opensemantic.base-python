@@ -15,10 +15,9 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-from uuid import UUID, uuid4
 
 from oold.model import BaseController
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from opensemantic.base._controller_logic import (
     build_sqlite_read_query,
@@ -1126,18 +1125,19 @@ class PostgrestTSDCMixin:
         ): pass
     """
 
-    uuid: UUID = Field(default_factory=uuid4)
     buffered: bool = True
     buffer_batch_size: int = 100
     buffer_offline_location: Optional[Path] = Path("buffered_data.sqlite")
     buffer_offline_batch_size: int = 500
     buffer_offline_sync_interval: float = 0.2
-    _offline: bool = False
-    _client: Optional[Any] = None
-    _buffer: Dict[str, List[Dict]] = {}
-    _buffer_lock: asyncio.Lock = None
-    _emulate_offline: bool = False
-    _local_db: Optional[Any] = None
+    # Private state (class-level defaults, no annotations to avoid
+    # Pydantic field registration issues)
+    _offline = False
+    _client = None
+    _buffer = {}
+    _buffer_lock = None
+    _emulate_offline = False
+    _local_db = None
 
     def set_client(self, client):
         """Set the PostgREST client connection."""
