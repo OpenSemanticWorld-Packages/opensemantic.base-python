@@ -6,11 +6,13 @@ dependency (no OPC UA, MQTT, etc.):
 2. Wrap in DataToolController (auto-inits archive DB)
 3. Store channel data by name and by instance (raw + typed)
 4. Load channel data back (raw + typed)
+5. Complex characteristic: AirQuality with nested Temperature + Pressure
 """
 
 import asyncio
 import datetime
 from pathlib import Path
+from typing import Optional
 from uuid import NAMESPACE_URL, uuid5
 
 from opensemantic import compute_scoped_uuid
@@ -21,10 +23,31 @@ from opensemantic.base.v1 import (
     DataToolController,
 )
 from opensemantic.characteristics.quantitative.v1 import (
+    ForcePerAreaUnit,
+    Pressure,
+    RelativeHumidity,
     Temperature,
     TemperatureUnit,
 )
 from opensemantic.core.v1 import Label
+from opensemantic.v1 import OswBaseModel
+
+
+# -- Define a complex characteristic --
+class AirQuality(OswBaseModel):
+    """A composite characteristic combining temperature, humidity, pressure.
+
+    Demonstrates how complex structured data can be stored and loaded
+    as a single channel value.
+    """
+
+    class Config:
+        schema_extra = {"title": "AirQuality"}
+
+    temperature: Optional[Temperature] = None
+    pressure: Optional[Pressure] = None
+    humidity: Optional[RelativeHumidity] = None
+
 
 DB_PATH = Path(__file__).parent / "example_archive.sqlite"
 PARENT_UUID = uuid5(NAMESPACE_URL, "ExampleDataTool")
@@ -126,12 +149,68 @@ async def main():
     for d in raw:
         print(f"  Pressure: {d}")
 
+    # -- 8. Complex characteristic: AirQuality --
+    print("\n--- Complex characteristic (AirQuality) ---")
+
+    # Add an air quality channel to a second controller
+    parent2 = uuid5(NAMESPACE_URL, "AirQualitySensor")
+    ctrl2 = DataToolController(
+        DataTool(
+            uuid=parent2,
+            name="AirQualitySensor",
+            label=[Label(text="Air Quality Sensor")],
+            data_channels=[
+                DataChannel(
+                    uuid=str(compute_scoped_uuid(parent2, "air")),
+                    osw_id="placeholder",
+                    name="air_quality",
+                    label=[Label(text="Air Quality")],
+                ),
+            ],
+            storage_locations=[Database(name="aq_archive", label=[Label(text="AQ")])],
+        ),
+        auto_archive=True,
+    )
+
+    # Store a complex value
+    await ctrl2.store_channel_data(
+        DataToolController.StoreChannelDataParams(
+            channel="air_quality",
+            value=AirQuality(
+                temperature=Temperature(value=22.5, unit=TemperatureUnit.Celsius),
+                pressure=Pressure(value=1013.25, unit=ForcePerAreaUnit.hecto_pascal),
+                humidity=RelativeHumidity(value=65.0),
+            ),
+            timestamp=now,
+        )
+    )
+    print("Stored AirQuality(temp=22.5C, press=1013.25hPa, humidity=65%)")
+
+    # Load back as typed AirQuality
+    results = await ctrl2.load_channel_data(
+        DataToolController.LoadChannelDataParams(
+            channel="air_quality",
+            target_schema=AirQuality,
+        )
+    )
+    for aq in results:
+        print(
+            f"  temp={aq.temperature.value} {aq.temperature.unit}, "
+            f"press={aq.pressure.value} {aq.pressure.unit}, "
+            f"humidity={aq.humidity.value} {aq.humidity.unit}"
+        )
+
+    await ctrl2.stop()
+    db2 = ctrl2.archive_database.db_path
+    if Path(db2).exists():
+        Path(db2).unlink()
+
     # -- Cleanup --
     await controller.stop()
     db_path = controller.archive_database.db_path
     if Path(db_path).exists():
         Path(db_path).unlink()
-    print(f"\nCleaned up {db_path}")
+    print("\nCleaned up")
 
 
 if __name__ == "__main__":

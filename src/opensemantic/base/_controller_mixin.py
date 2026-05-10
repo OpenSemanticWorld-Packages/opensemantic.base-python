@@ -58,12 +58,7 @@ class DataToolMixin(BaseController):
         if self.auto_archive and _needs_init and _storage:
             self.archive_database = self._init_archive_database(_storage[0])
 
-    def __setattr__(self, name, value, internal=False):
-        if name.startswith("_"):
-            object.__setattr__(self, name, value)
-        else:
-            super().__setattr__(name, value, internal=internal)
-
+    # __setattr__ for private attrs inherited from BaseController
     # get_osw_id() and get_iri() are inherited from OswBaseModel
     # via the model base class (DataTool -> Entity -> OswBaseModel)
 
@@ -200,28 +195,87 @@ class DataToolMixin(BaseController):
             )
             return None
 
-        # Determine target controller class and extra kwargs
-        server = getattr(db, "server", None)
+        # Determine target controller class and extra kwargs.
+        # Try inline object first, then IRI resolution via backend.
+        server = db.__dict__.get("server")
         server_url = getattr(server, "url", None) if server else None
+        if server_url is None:
+            # Server may be an IRI in __iris__ - try to resolve or
+            # use the IRI itself if it looks like a URL
+            server_iri = getattr(db, "__iris__", {}).get("server")
+            if server_iri and isinstance(server_iri, str):
+                if server_iri.startswith("http"):
+                    server_url = server_iri
+                else:
+                    try:
+                        server = getattr(db, "server", None)
+                        server_url = getattr(server, "url", None) if server else None
+                    except (ValueError, ImportError):
+                        pass
+
+        # Build API URL from server fields
+        if not server_url and server is not None:
+            schema = getattr(server, "schema_", None) or "http"
+            domain = getattr(server, "domain", None)
+            ports = getattr(server, "network_port", None)
+            port = ports[0] if ports else None
+            path = getattr(server, "url_path", None) or ""
+            if domain:
+                server_url = f"{schema}://{domain}"
+                if port:
+                    server_url += f":{port}"
+                server_url += f"/{path}".rstrip("/")
 
         if server_url:
             try:
-                from opensemantic.base._controller import (
-                    PostgrestTimeSeriesDatabaseController,
+                from postgrest import AsyncPostgrestClient
+
+                # Look up credentials for this server
+                cred = self.get_credential(server_url)
+                headers = {}
+                if cred is not None:
+                    token = getattr(cred, "token", None)
+                    if token is not None:
+                        secret = (
+                            token.get_secret_value()
+                            if hasattr(token, "get_secret_value")
+                            else str(token)
+                        )
+                        headers["Authorization"] = f"Bearer {secret}"
+
+                client = AsyncPostgrestClient(
+                    base_url=server_url,
+                    schema="api",
+                    headers=headers,
                 )
+
+                # Use version-matching controller
+                db_module = type(db).__module__
+                if ".v1." in db_module or db_module.endswith(".v1"):
+                    from opensemantic.base.v1._controller import (
+                        PostgrestTimeSeriesDatabaseController,
+                    )
+                else:
+                    from opensemantic.base._controller import (
+                        PostgrestTimeSeriesDatabaseController,
+                    )
 
                 controller = db.cast(
                     PostgrestTimeSeriesDatabaseController,
                     remove_extra=True,
                 )
+                controller.set_client(client)
                 _logger.info(
-                    "Auto-initialized PostgrestTimeSeriesDatabaseController"
-                    " for %s at %s",
+                    "Auto-initialized PostgREST controller" " for %s at %s",
                     db.name,
                     server_url,
                 )
                 return controller
-            except (ImportError, Exception) as e:
+            except ImportError:
+                _logger.warning(
+                    "postgrest package not installed. " "Falling back to local SQLite."
+                )
+            except Exception as e:
                 _logger.warning(
                     "Could not create PostgREST controller for %s: %s."
                     " Falling back to local SQLite.",
@@ -622,12 +676,32 @@ class DataToolMixin(BaseController):
         to base unit if available.
         """
         if hasattr(value, "to_json"):
+            # Warn if typed value's unit differs from channel's unit
+            ch_unit = getattr(channel, "unit", None)
+            val_unit = getattr(value, "unit", None)
+            if ch_unit is not None and val_unit is not None:
+                # Resolve channel unit IRI to enum for comparison
+                try:
+                    resolved = type(value)(value=0, unit=ch_unit).unit
+                    if str(resolved) != str(val_unit):
+                        _logger.warning(
+                            "Value unit %s differs from channel '%s' "
+                            "unit %s. Storing in base unit.",
+                            val_unit,
+                            getattr(channel, "name", "?"),
+                            resolved,
+                        )
+                except Exception:
+                    pass
             if hasattr(value, "to_base"):
                 try:
                     value = value.to_base()
                 except Exception:
                     pass
-            return value.to_json(exclude_defaults=True)
+            try:
+                return value.to_json(exclude_defaults=True)
+            except Exception:
+                return value.to_json()
         if isinstance(value, dict):
             return json.loads(json.dumps(value, default=str))
         # Raw scalar: wrap with channel unit if available
@@ -724,11 +798,14 @@ class DataToolMixin(BaseController):
             ch_unit = getattr(channel, "unit", None) if channel else None
             results = []
             for row in raw:
+                # Load in base unit (from_json with defaults)
                 obj = cls.from_json(row["data"])
-                # Convert from base unit to channel's display unit
+                # Convert to channel's display unit
                 if ch_unit is not None and hasattr(obj, "to_unit"):
                     try:
-                        obj = obj.to_unit(ch_unit)
+                        # Resolve unit IRI to enum via a temp instance
+                        target = cls(value=0, unit=ch_unit)
+                        obj = obj.to_unit(target.unit)
                     except Exception:
                         pass
                 results.append(obj)
@@ -1241,6 +1318,17 @@ class PostgrestTSDCMixin:
             return False
 
     async def write_tool_channel_raw(self, params: TSDCMixin.WriteToolChannelRawParams):
+        # Auto-create tool on first write
+        if not hasattr(self, "_created_tools"):
+            object.__setattr__(self, "_created_tools", set())
+        if params.tool_osw_id not in self._created_tools:
+            try:
+                await self.create_tool(
+                    TSDCMixin.CreateToolParams(tool_osw_id=params.tool_osw_id)
+                )
+            except Exception:
+                pass  # may already exist
+            self._created_tools.add(params.tool_osw_id)
         if self.buffered:
             if self._buffer_lock is None:
                 self._buffer_lock = asyncio.Lock()
