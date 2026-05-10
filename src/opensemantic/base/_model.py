@@ -6916,7 +6916,8 @@ class DataTool(Tool):
                             "characteristic": {
                                 "@id": "Property:HasCharacteristic",
                                 "@type": "@id",
-                            }
+                            },
+                            "unit": {"@id": "Property:HasUnit", "@type": "@id"},
                         },
                     },
                 },
