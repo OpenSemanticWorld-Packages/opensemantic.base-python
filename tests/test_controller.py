@@ -469,7 +469,7 @@ def test_postgrest_crud():
 
         # JSONB filter
         res = (
-            await db._client.table(tool_id)
+            await db._driver.client.table(tool_id)
             .select("*")
             .filter("data->>value", "eq", 23.4)
             .execute()
@@ -500,6 +500,7 @@ def test_postgrest_offline_buffer():
 
     async def _test():
         db = _get_postgrest_db(buffered=True, buffer_batch_size=1)
+        await db.start_offline_sync()
 
         tool_id = "OSWbad8e2eaa5b0412da008182386ebab68"
         ch_id = "OSWbad1e2eaa5b0412da008182386ebab68"
@@ -527,7 +528,7 @@ def test_postgrest_offline_buffer():
         )
 
         # Go offline
-        db._emulate_offline = True
+        db._driver._emulate_offline = True
         await db.write_tool_channel_raw(
             TimeSeriesDatabaseController.WriteToolChannelRawParams(
                 tool_osw_id=tool_id,
@@ -538,7 +539,7 @@ def test_postgrest_offline_buffer():
         )
 
         # Come back online
-        db._emulate_offline = False
+        db._driver._emulate_offline = False
         await db.write_tool_channel_raw(
             TimeSeriesDatabaseController.WriteToolChannelRawParams(
                 tool_osw_id=tool_id,
