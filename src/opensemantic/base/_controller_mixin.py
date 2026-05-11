@@ -12,7 +12,7 @@ import logging
 from abc import abstractmethod
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from oold.model import BaseController
 from pydantic import BaseModel, ConfigDict
@@ -367,35 +367,34 @@ class DataToolMixin(BaseController):
 
     class LoadChannelDataParams(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
-        channel: Any = None
-        """DataChannel instance, channel name (str), or None (all)."""
+        channel: Union[str, List[str], Any, None] = None
+        """Channel name (str), list of names, DataChannel instance,
+        list of DataChannel instances, or None (all channels)."""
         start: Optional[dt.datetime] = None
         end: Optional[dt.datetime] = None
         limit: Optional[int] = None
+        typed: bool = True
+        """If True, deserialize values using channel characteristic or
+        target_schema. If False, return raw dicts (faster)."""
         target_schema: Any = None
-        """Class for typed deserialization (e.g. Temperature)."""
+        """Explicit class for typed deserialization (e.g. Temperature).
+        Overrides channel characteristic resolution."""
+
+    class ChannelDataPoint(BaseModel):
+        """A single data point returned by load_channel_data."""
+
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        timestamp: dt.datetime
+        channel: Any = None
+        value: Any = None
+        """Typed Characteristic instance or raw dict, depending on
+        the typed parameter and channel characteristic."""
 
     class ChannelDataChangeNotificationParams(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
         channel: Any = None
         value: Any = None
         timestamp: Optional[dt.datetime] = None
-
-    class ReadArchiveDataParams(BaseModel):
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        channel: Any = None
-        start: Optional[dt.datetime] = None
-        end: Optional[dt.datetime] = None
-        max_rows: Optional[int] = 1000
-
-    class ReadArchiveDataResultRow(BaseModel):
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        timestamp: dt.datetime
-        channel: Any = None
-        data: Dict[str, Any] = {}
-
-    class ReadArchiveDataResult(BaseModel):
-        data: List[Any] = []
 
     class AutoArchiveParams(BaseModel):
         enable: bool = True
@@ -490,174 +489,8 @@ class DataToolMixin(BaseController):
                         _logger.error("Error creating tool %s: %s", osw_id, e)
             await asyncio.sleep(1)
 
-    async def read_archive_data(
-        self,
-        params: "DataToolMixin.ReadArchiveDataParams" = None,
-    ):
-        if self.archive_database is None:
-            raise ValueError("No archive database configured")
-        if params is None:
-            params = type(self).ReadArchiveDataParams()
-        ch_osw_id = None
-        if params.channel:
-            ch_osw_id = params.channel.get_osw_id()
-            if "#" in ch_osw_id:
-                ch_osw_id = ch_osw_id.split("#")[-1]
-        _params = TSDCMixin.ReadToolChannelRawParams(
-            tool_osw_id=self.get_osw_id(),
-            channel_osw_id=ch_osw_id,
-            start=params.start,
-            end=params.end,
-            limit=params.max_rows,
-        )
-        results = await self.archive_database.read_tool_channel_raw(_params)
-        ch_dict = {ch.get_osw_id(): ch for ch in self.get_all_channels()}
-        return type(self).ReadArchiveDataResult(
-            data=[
-                type(self).ReadArchiveDataResultRow(
-                    timestamp=row["ts"],
-                    channel=(
-                        params.channel if params.channel else ch_dict.get(row["ch"])
-                    ),
-                    data=row["data"],
-                )
-                for row in results
-                if row["ch"] in ch_dict
-            ]
-        )
-
-    def read_archive_data_sync(self, params=None):
-        return asyncio.run(self.read_archive_data(params=params))
-
-    # -- Typed read/write --
-
-    class TypedDataRow(BaseModel):
-        """A single typed data point for store_typed_data."""
-
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        ts: dt.datetime
-        channel: Any  # DataChannel with characteristic set
-        value: Any  # Characteristic instance (e.g. Temperature)
-
-    class StoreTypedDataParams(BaseModel):
-        """Parameters for store_typed_data."""
-
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        tool_osw_id: str
-        rows: List[Any]  # List of TypedDataRow
-        include_defaults: bool = False
-
-    async def store_typed_data(self, params: "DataToolMixin.StoreTypedDataParams"):
-        """Write characteristic instances to the archive database.
-
-        Converts values to base units via to_base(), then serializes
-        with to_json(). By default, strips fields that match class
-        defaults (type, unit) for compact storage.
-        """
-        if self.archive_database is None:
-            raise ValueError("No archive database configured")
-        raw_rows = []
-        for row in params.rows:
-            val = row.value
-            if hasattr(val, "to_base"):
-                try:
-                    val = val.to_base()
-                except Exception:
-                    pass  # offset units (e.g. Celsius) - keep as-is
-            data = val.to_json(exclude_defaults=not params.include_defaults)
-            ch_osw_id = row.channel.get_osw_id()
-            if "#" in ch_osw_id:
-                ch_osw_id = ch_osw_id.split("#", 1)[1]
-            raw_rows.append(
-                {
-                    "ts": row.ts.isoformat(),
-                    "ch": ch_osw_id,
-                    "data": data,
-                }
-            )
-        await self.archive_database.write_tool_channel_raw(
-            TSDCMixin.WriteToolChannelRawParams(
-                tool_osw_id=params.tool_osw_id,
-                data=raw_rows,
-            )
-        )
-
-    class ReadTypedDataParams(BaseModel):
-        """Parameters for read_typed_data."""
-
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        tool_osw_id: str
-        channel: Any = None
-        target_schema: Any = None  # Class to deserialize into
-        start: Optional[dt.datetime] = None
-        end: Optional[dt.datetime] = None
-        limit: Optional[int] = None
-
-    async def read_typed_data(self, params: "DataToolMixin.ReadTypedDataParams"):
-        """Read data and deserialize using channel characteristics.
-
-        Resolution priority for the target class:
-        1. params.target_schema (explicit override)
-        2. 'type' field in stored data (IRI-based, future)
-        3. Channel's characteristic (must be a class)
-
-        Returns a list of deserialized Characteristic instances.
-        """
-        if self.archive_database is None:
-            raise ValueError("No archive database configured")
-        ch_osw_id = None
-        if params.channel:
-            ch_osw_id = params.channel.get_osw_id()
-            if "#" in ch_osw_id:
-                ch_osw_id = ch_osw_id.split("#", 1)[1]
-        raw = await self.archive_database.read_tool_channel_raw(
-            TSDCMixin.ReadToolChannelRawParams(
-                tool_osw_id=params.tool_osw_id,
-                channel_osw_id=ch_osw_id,
-                start=params.start,
-                end=params.end,
-                limit=params.limit,
-            )
-        )
-        ch_dict = {}
-        for ch in self.get_all_channels():
-            _id = ch.get_osw_id()
-            if "#" in _id:
-                _id = _id.split("#", 1)[1]
-            ch_dict[_id] = ch
-
-        results = []
-        for row in raw:
-            data = row["data"]
-            ch = params.channel or ch_dict.get(row["ch"])
-            cls = params.target_schema
-            # Resolve from stored type IRI in data
-            if cls is None and isinstance(data, dict) and "type" in data:
-                from oold.model import _types
-
-                type_iri = data["type"]
-                if isinstance(type_iri, list):
-                    type_iri = type_iri[0]
-                cls = _types.get(type_iri)
-            # Resolve from channel's characteristic IRI via registry
-            if cls is None and ch is not None:
-                from oold.model import _types
-
-                char_iris = getattr(ch, "__iris__", {}).get("characteristic", [])
-                if isinstance(char_iris, str):
-                    char_iris = [char_iris]
-                for iri in char_iris:
-                    cls = _types.get(iri)
-                    if cls is not None:
-                        break
-            if cls is None:
-                raise ValueError(
-                    f"Cannot determine schema for channel "
-                    f"{row['ch']}. Set characteristic on the "
-                    f"channel or pass target_schema."
-                )
-            results.append(cls.from_json(data))
-        return results
+    # read_archive_data, store_typed_data, read_typed_data removed.
+    # Use store_channel_data / load_channel_data instead.
 
     def _value_to_store_data(self, value, channel):
         """Convert a value to a dict suitable for DB storage.
@@ -715,7 +548,9 @@ class DataToolMixin(BaseController):
 
     # -- High-level store/load API --
 
-    async def store_channel_data(self, params: "DataToolMixin.StoreChannelDataParams"):
+    async def store_channel_data(
+        self, params: "DataToolMixin.StoreChannelDataParams"
+    ) -> None:
         """Store a single channel value to the archive database.
 
         Resolves channel by name if a string is passed.
@@ -749,26 +584,52 @@ class DataToolMixin(BaseController):
             )
         )
 
-    async def load_channel_data(self, params: "DataToolMixin.LoadChannelDataParams"):
+    async def load_channel_data(
+        self,
+        params: "DataToolMixin.LoadChannelDataParams",
+    ) -> List["DataToolMixin.ChannelDataPoint"]:
         """Load channel data from the archive database.
 
-        Resolves channel by name if a string is passed.
-        If target_schema is set, deserializes via from_json().
-        If channel has a characteristic, resolves class via _types.
-        Otherwise returns raw dicts.
+        Parameters
+        ----------
+        params
+            LoadChannelDataParams with channel (str, list, instance, or
+            None for all), time range, limit, typed flag, target_schema.
+
+        Returns
+        -------
+        List[ChannelDataPoint]
+            Each point has timestamp, channel, and value (typed
+            Characteristic if typed=True, raw dict if typed=False).
         """
         if self.archive_database is None:
             raise ValueError("No archive database configured")
-        channel = (
-            self._resolve_channel(params.channel)
-            if params.channel is not None
-            else None
-        )
+
+        # Resolve channels
+        channels = params.channel
+        if channels is None:
+            channels = self.get_all_channels()
+        elif isinstance(channels, str):
+            channels = [self._resolve_channel(channels)]
+        elif isinstance(channels, list):
+            channels = [
+                self._resolve_channel(ch) if isinstance(ch, str) else ch
+                for ch in channels
+            ]
+        else:
+            channels = [channels]
+
+        # Build channel ID -> channel lookup
+        ch_by_id = {}
+        for ch in channels:
+            osw_id = ch.get_osw_id()
+            short_id = osw_id.split("#")[-1] if "#" in osw_id else osw_id
+            ch_by_id[short_id] = ch
+
+        # Query: if single channel, filter by ID; otherwise get all
         ch_osw_id = None
-        if channel is not None:
-            ch_osw_id = channel.get_osw_id()
-            if "#" in ch_osw_id:
-                ch_osw_id = ch_osw_id.split("#")[-1]
+        if len(channels) == 1:
+            ch_osw_id = list(ch_by_id.keys())[0]
 
         raw = await self.archive_database.read_tool_channel_raw(
             TSDCMixin.ReadToolChannelRawParams(
@@ -780,28 +641,35 @@ class DataToolMixin(BaseController):
             )
         )
 
-        # Determine deserialization class
-        cls = params.target_schema
-        if cls is None and channel is not None:
-            cls = self._resolve_characteristic_class(channel)
+        results: List["DataToolMixin.ChannelDataPoint"] = []
+        for row in raw:
+            ch = ch_by_id.get(row["ch"])
+            if ch is None and len(ch_by_id) > 1:
+                continue  # skip rows for channels not in the request
 
-        if cls is not None:
-            ch_unit = getattr(channel, "unit", None) if channel else None
-            results = []
-            for row in raw:
-                # Load in base unit (from_json with defaults)
-                obj = cls.from_json(row["data"])
-                # Convert to channel's display unit
-                if ch_unit is not None and hasattr(obj, "to_unit"):
-                    try:
-                        # Resolve unit IRI to enum via a temp instance
-                        target = cls(value=0, unit=ch_unit)
-                        obj = obj.to_unit(target.unit)
-                    except Exception:
-                        pass
-                results.append(obj)
-            return results
-        return [row["data"] for row in raw]
+            value = row["data"]
+            if params.typed:
+                cls = params.target_schema
+                if cls is None and ch is not None:
+                    cls = self._resolve_characteristic_class(ch)
+                if cls is not None:
+                    value = cls.from_json(value)
+                    ch_unit = getattr(ch, "unit", None) if ch else None
+                    if ch_unit is not None and hasattr(value, "to_unit"):
+                        try:
+                            target = cls(value=0, unit=ch_unit)
+                            value = value.to_unit(target.unit)
+                        except Exception:
+                            pass
+
+            results.append(
+                type(self).ChannelDataPoint(
+                    timestamp=row["ts"],
+                    channel=ch,
+                    value=value,
+                )
+            )
+        return results
 
     def _resolve_characteristic_class(self, channel):
         """Try to resolve the characteristic class for a channel.

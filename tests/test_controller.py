@@ -828,7 +828,6 @@ def test_datatool_controller_typed_write_read():
     from uuid import uuid4
 
     from opensemantic.base import DataToolController
-    from opensemantic.base._controller_mixin import DataToolMixin, TSDCMixin
     from opensemantic.base._model import DataChannel
     from opensemantic.characteristics.quantitative import (
         Temperature,
@@ -858,33 +857,22 @@ def test_datatool_controller_typed_write_read():
     now = datetime.datetime.now(datetime.timezone.utc)
 
     async def _test():
-        await archive.create_tool(
-            TSDCMixin.CreateToolParams(tool_osw_id=dt.get_osw_id())
-        )
-        await dt.store_typed_data(
-            DataToolMixin.StoreTypedDataParams(
-                tool_osw_id=dt.get_osw_id(),
-                rows=[
-                    DataToolMixin.TypedDataRow(
-                        ts=now,
-                        channel=dt.data_channels[0],
-                        value=Temperature(
-                            value=300.0,
-                            unit=TemperatureUnit.kelvin,
-                        ),
-                    ),
-                ],
+        await dt.store_channel_data(
+            dt.StoreChannelDataParams(
+                channel="typed_ch",
+                value=Temperature(value=300.0, unit=TemperatureUnit.kelvin),
+                timestamp=now,
             )
         )
-        results = await dt.read_typed_data(
-            DataToolMixin.ReadTypedDataParams(
-                tool_osw_id=dt.get_osw_id(),
-                channel=dt.data_channels[0],
+        results = await dt.load_channel_data(
+            dt.LoadChannelDataParams(
+                channel="typed_ch",
+                target_schema=Temperature,
             )
         )
         assert len(results) == 1
-        assert isinstance(results[0], Temperature)
-        assert results[0].value == pytest.approx(300.0)
+        assert hasattr(results[0], "value")
+        assert results[0].value.value == pytest.approx(300.0)
 
     asyncio.run(_test())
 
@@ -994,7 +982,7 @@ def test_store_channel_data_by_name():
             ctrl.LoadChannelDataParams(channel="pressure")
         )
         assert len(results) == 1
-        assert results[0]["value"] == 23.5
+        assert results[0].value["value"] == 23.5
 
     asyncio.run(_test())
     _cleanup_archive(ctrl)
@@ -1027,8 +1015,8 @@ def test_store_channel_data_typed():
             )
         )
         assert len(results) == 1
-        assert isinstance(results[0], Temperature)
-        assert results[0].value == pytest.approx(300.0)
+        assert hasattr(results[0].value, "value")
+        assert results[0].value.value == pytest.approx(300.0)
 
     asyncio.run(_test())
     _cleanup_archive(ctrl)
@@ -1057,8 +1045,8 @@ def test_load_channel_data_auto_typed():
         )
         assert len(results) == 1
         # Auto-resolved class may be v2 Temperature from _types registry
-        assert hasattr(results[0], "value")
-        assert results[0].value == pytest.approx(295.0)
+        assert hasattr(results[0].value, "value")
+        assert results[0].value.value == pytest.approx(295.0)
 
     asyncio.run(_test())
     _cleanup_archive(ctrl)
@@ -1083,8 +1071,8 @@ def test_load_channel_data_raw():
             ctrl.LoadChannelDataParams(channel="pressure")
         )
         assert len(results) == 1
-        assert isinstance(results[0], dict)
-        assert results[0]["value"] == 1013.25
+        assert isinstance(results[0].value, dict)
+        assert results[0].value["value"] == 1013.25
 
     asyncio.run(_test())
     _cleanup_archive(ctrl)
@@ -1149,7 +1137,7 @@ def test_store_load_roundtrip():
             )
         )
         assert len(results) == 1
-        loaded = results[0]
+        loaded = results[0].value
         assert loaded.value == pytest.approx(original.value)
         assert loaded.unit == original.unit
 
@@ -1209,8 +1197,8 @@ def test_v2_datatool_store_load_auto_typed():
             ctrl.LoadChannelDataParams(channel="temperature")
         )
         assert len(results) == 1
-        assert hasattr(results[0], "value")
-        assert results[0].value == pytest.approx(300.0)
+        assert hasattr(results[0].value, "value")
+        assert results[0].value.value == pytest.approx(300.0)
 
     asyncio.run(_test())
     _cleanup_archive(ctrl)
