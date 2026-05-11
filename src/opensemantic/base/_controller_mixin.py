@@ -528,17 +528,18 @@ class DataToolMixin(BaseController):
                 return value.to_json()
         if isinstance(value, dict):
             return json.loads(json.dumps(value, default=str))
-        # Raw scalar: wrap with channel unit if available
-        cls = self._resolve_characteristic_class(channel)
-        ch_unit = getattr(channel, "unit", None)
-        if cls is not None and ch_unit is not None:
-            typed = cls(value=value, unit=ch_unit)
+        # Raw scalar: wrap with channel unit, convert to base, serialize
+        typed = self._wrap_raw_value(value, channel)
+        if hasattr(typed, "to_json"):
             if hasattr(typed, "to_base"):
                 try:
                     typed = typed.to_base()
                 except Exception:
                     pass
-            return typed.to_json(exclude_defaults=True)
+            try:
+                return typed.to_json(exclude_defaults=True)
+            except Exception:
+                return typed.to_json()
         return {"value": value}
 
     async def stop(self):
@@ -670,6 +671,24 @@ class DataToolMixin(BaseController):
                 )
             )
         return results
+
+    def _wrap_raw_value(self, value, channel):
+        """Wrap a raw scalar in the channel's characteristic class.
+
+        If the channel has a characteristic class and a unit, creates a
+        typed instance (e.g., Temperature(value=22.5, unit=Celsius)).
+        Returns the original value if wrapping is not possible.
+        """
+        if hasattr(value, "to_json") or isinstance(value, dict):
+            return value
+        cls = self._resolve_characteristic_class(channel)
+        ch_unit = getattr(channel, "unit", None)
+        if cls is not None and ch_unit is not None:
+            try:
+                return cls(value=value, unit=ch_unit)
+            except Exception:
+                pass
+        return value
 
     def _resolve_characteristic_class(self, channel):
         """Try to resolve the characteristic class for a channel.
