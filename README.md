@@ -94,11 +94,54 @@ await db.write_tool_channel_raw(params)
 await db.read_tool_channel_raw(params)
 ```
 
+## DataToolView (Dashboard UI)
+
+Interactive dashboard for visualizing archived time series data from DataToolControllers.
+
+Features:
+- Wunderbaum TreeGrid for channel selection with characteristic metadata
+- Stacked Bokeh plots grouped by characteristic (temperature, pressure, etc.)
+- Unit conversion via dropdown (e.g. K to C, Pa to hPa)
+- Composite channel splitting (e.g. AirQuality into temperature + pressure sub-plots)
+- Text channel log console with timestamped entries
+- Configurable via JsonEditor (grouping, auto-fetch, row limit, cache)
+
+![Archive Demo](docs/archive_demo.gif)
+
+*Interactive demo: channel selection, plotting, unit switching*
+
+![Archive Dashboard](docs/screenshot_archive_plots.png)
+
+*Channel selection with stacked plots grouped by characteristic*
+
+![Unit Switching](docs/screenshot_unit_switch.png)
+
+*Unit conversion via dropdown (K to C)*
+
+![Log Console](docs/screenshot_log_console.png)
+
+*Text channel log console with timestamped entries*
+
+```python
+from opensemantic.base.view import DataToolView
+from opensemantic.base.view._config import DashboardConfig, PlotConfig
+
+view = DataToolView(
+    controllers=[ctrl],
+    config=DashboardConfig(lang="en", plot=PlotConfig(auto_fetch=True)),
+    title="My Dashboard",
+)
+view.servable()  # for panel serve
+```
+
+See [examples/datatool_dashboard.py](examples/datatool_dashboard.py) for a full working example.
+
 ## Installation
 
 ```bash
 pip install opensemantic.base            # models only
 pip install opensemantic.base[controller] # + aiosqlite, postgrest
+pip install opensemantic.base[view]       # + panel, bokeh, panelini, pint
 ```
 
 ## Testing
