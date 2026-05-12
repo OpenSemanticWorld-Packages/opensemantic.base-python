@@ -42,7 +42,7 @@ class TimeSeriesDatabaseController(TSDCMixin, _Database):
 try:
     import aiosqlite  # noqa: F401
 
-    from opensemantic.base._drivers import LocalDriver
+    from opensemantic.base._drivers import LocalDatabaseDriver
 
     class LocalTimeSeriesDatabaseController(TimeSeriesDatabaseController):
         """SQLite-based local time series database controller (v1)."""
@@ -50,11 +50,11 @@ try:
         db_path: Union[str, Path]
         buffered: bool = False
         buffer_batch_size: int = 100
-        _driver: LocalDriver = PrivateAttr(default=None)
+        _driver: LocalDatabaseDriver = PrivateAttr(default=None)
 
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self._driver = LocalDriver(
+            self._driver = LocalDatabaseDriver(
                 self.db_path,
                 buffered=self.buffered,
                 buffer_batch_size=self.buffer_batch_size,
@@ -116,7 +116,7 @@ except ImportError:
 try:
     from postgrest import AsyncPostgrestClient  # noqa: F401
 
-    from opensemantic.base._drivers import PostgrestDriver
+    from opensemantic.base._drivers import PostgrestDatabaseDriver
 
     class PostgrestTimeSeriesDatabaseController(TimeSeriesDatabaseController):
         """PostgREST-based remote time series database controller (v1)."""
@@ -126,11 +126,11 @@ try:
         buffer_offline_location: Optional[Path] = Path("buffered_data.sqlite")
         buffer_offline_batch_size: int = 500
         buffer_offline_sync_interval: float = 0.2
-        _driver: PostgrestDriver = PrivateAttr(default=None)
+        _driver: PostgrestDatabaseDriver = PrivateAttr(default=None)
 
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self._driver = PostgrestDriver(
+            self._driver = PostgrestDatabaseDriver(
                 buffered=self.buffered,
                 buffer_batch_size=self.buffer_batch_size,
                 buffer_offline_location=self.buffer_offline_location,

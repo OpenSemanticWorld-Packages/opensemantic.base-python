@@ -903,5 +903,5 @@ class TSDCMixin(BaseController):
 
 
 # LocalTSDCMixin and PostgrestTSDCMixin removed.
-# Replaced by LocalDriver and PostgrestDriver in _drivers.py.
+# Replaced by LocalDatabaseDriver and PostgrestDatabaseDriver in _drivers.py.
 # Controllers use driver composition via _driver PrivateAttr.
