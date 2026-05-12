@@ -542,10 +542,41 @@ class DataToolMixin(BaseController):
                 return typed.to_json()
         return {"value": value}
 
-    async def stop(self):
-        _logger.warning("Stopping")
+    async def set_buffered(self, enabled: bool = True, batch_size: int = 100):
+        """Enable or disable buffered writes on the archive database.
+
+        When enabled, writes are collected in memory and flushed to disk
+        in batches, which is much faster for bulk inserts.
+        Call flush_buffer() when done to persist any remaining data.
+        When disabling, any pending buffered data is flushed automatically.
+        """
+        db = self.archive_database
+        if db is None:
+            _logger.warning("No archive database configured")
+            return
+        driver = getattr(db, "_driver", None)
+        if driver is None:
+            _logger.warning("Archive database has no _driver attribute")
+            return
+        if not enabled and driver.buffered:
+            await self.flush_buffer()
+        driver.buffered = enabled
+        driver.buffer_batch_size = batch_size
+        if enabled:
+            _logger.info(
+                "Buffered write mode enabled (batch_size=%d). "
+                "Call flush_buffer() when done to persist remaining data.",
+                batch_size,
+            )
+
+    async def flush_buffer(self):
+        """Flush buffered writes to the archive database."""
         if self.archive_database is not None:
             await self.archive_database.flush_buffer()
+
+    async def stop(self):
+        _logger.warning("Stopping")
+        await self.flush_buffer()
 
     # -- High-level store/load API --
 

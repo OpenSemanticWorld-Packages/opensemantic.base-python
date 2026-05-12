@@ -1212,3 +1212,272 @@ def _cleanup_archive(ctrl):
     db_path = getattr(ctrl.archive_database, "db_path", None)
     if db_path and Path(db_path).exists():
         os.unlink(db_path)
+
+
+# -- Buffered LocalDriver tests --
+
+
+@pytest.fixture
+def buffered_sqlite_db():
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as f:
+        path = f.name
+    db = LocalTSDC_v1(
+        name="test_buf",
+        label=[Label_v1(text="Buffered Test", lang="en")],
+        db_path=path,
+        buffered=True,
+        buffer_batch_size=5,
+    )
+    yield db
+    os.unlink(path)
+
+
+def test_buffered_driver_init(buffered_sqlite_db):
+    """Buffered driver is initialized with correct settings."""
+    assert buffered_sqlite_db._driver.buffered is True
+    assert buffered_sqlite_db._driver.buffer_batch_size == 5
+
+
+def test_buffered_write_does_not_persist_below_batch(buffered_sqlite_db):
+    """Rows below batch size stay in buffer, not in DB."""
+
+    async def _test():
+        db = buffered_sqlite_db
+        await db.write_tool_channel_raw(
+            TSDC_v1.WriteToolChannelRawParams(
+                tool_osw_id="OSW_buf",
+                data=[
+                    {"ts": "2024-01-01T00:00:00", "ch": "c1", "data": {"v": i}}
+                    for i in range(3)
+                ],
+            )
+        )
+        # 3 rows < batch_size=5, should still be in buffer
+        assert len(db._driver._buffer.get("OSW_buf", [])) == 3
+        # Table not created yet since nothing flushed
+        tools = await db.get_tools_list()
+        assert "OSW_buf" not in tools
+
+    asyncio.run(_test())
+
+
+def test_buffered_write_flushes_at_batch_size(buffered_sqlite_db):
+    """Rows are flushed when batch size is reached."""
+
+    async def _test():
+        db = buffered_sqlite_db
+        await db.write_tool_channel_raw(
+            TSDC_v1.WriteToolChannelRawParams(
+                tool_osw_id="OSW_buf2",
+                data=[
+                    {"ts": f"2024-01-01T00:00:0{i}", "ch": "c1", "data": {"v": i}}
+                    for i in range(6)
+                ],
+            )
+        )
+        # 6 rows >= batch_size=5, should have flushed
+        rows = await db.read_tool_channel_raw(
+            TSDC_v1.ReadToolChannelRawParams(tool_osw_id="OSW_buf2")
+        )
+        assert len(rows) == 6
+        assert len(db._driver._buffer.get("OSW_buf2", [])) == 0
+
+    asyncio.run(_test())
+
+
+def test_buffered_flush_buffer_persists_remaining(buffered_sqlite_db):
+    """flush_buffer() persists all remaining buffered rows."""
+
+    async def _test():
+        db = buffered_sqlite_db
+        await db.write_tool_channel_raw(
+            TSDC_v1.WriteToolChannelRawParams(
+                tool_osw_id="OSW_buf3",
+                data=[
+                    {"ts": "2024-01-01T00:00:00", "ch": "c1", "data": {"v": 1}},
+                    {"ts": "2024-01-01T00:00:01", "ch": "c1", "data": {"v": 2}},
+                ],
+            )
+        )
+        # 2 rows < batch_size=5, table not created yet
+        tools = await db.get_tools_list()
+        assert "OSW_buf3" not in tools
+
+        await db.flush_buffer()
+        rows = await db.read_tool_channel_raw(
+            TSDC_v1.ReadToolChannelRawParams(tool_osw_id="OSW_buf3")
+        )
+        assert len(rows) == 2
+
+    asyncio.run(_test())
+
+
+def test_buffered_flush_specific_tool(buffered_sqlite_db):
+    """flush_buffer(tool_id) only flushes that tool's buffer."""
+
+    async def _test():
+        db = buffered_sqlite_db
+        await db.write_tool_channel_raw(
+            TSDC_v1.WriteToolChannelRawParams(
+                tool_osw_id="OSW_a",
+                data=[{"ts": "2024-01-01T00:00:00", "ch": "c1", "data": {"v": 1}}],
+            )
+        )
+        await db.write_tool_channel_raw(
+            TSDC_v1.WriteToolChannelRawParams(
+                tool_osw_id="OSW_b",
+                data=[{"ts": "2024-01-01T00:00:00", "ch": "c1", "data": {"v": 2}}],
+            )
+        )
+        await db.flush_buffer("OSW_a")
+
+        rows_a = await db.read_tool_channel_raw(
+            TSDC_v1.ReadToolChannelRawParams(tool_osw_id="OSW_a")
+        )
+        assert len(rows_a) == 1
+
+        # OSW_b should still be only in buffer
+        assert len(db._driver._buffer.get("OSW_b", [])) == 1
+
+    asyncio.run(_test())
+
+
+def test_buffered_multiple_flushes(buffered_sqlite_db):
+    """Multiple write + flush cycles accumulate correctly."""
+
+    async def _test():
+        db = buffered_sqlite_db
+        for batch in range(3):
+            await db.write_tool_channel_raw(
+                TSDC_v1.WriteToolChannelRawParams(
+                    tool_osw_id="OSW_multi",
+                    data=[
+                        {
+                            "ts": f"2024-01-01T00:0{batch}:0{i}",
+                            "ch": "c1",
+                            "data": {"v": batch * 10 + i},
+                        }
+                        for i in range(3)
+                    ],
+                )
+            )
+            await db.flush_buffer()
+
+        rows = await db.read_tool_channel_raw(
+            TSDC_v1.ReadToolChannelRawParams(tool_osw_id="OSW_multi")
+        )
+        assert len(rows) == 9
+
+    asyncio.run(_test())
+
+
+# -- DataToolController set_buffered / flush_buffer tests --
+
+
+def test_set_buffered_enables_buffering():
+    """set_buffered(True) enables buffered writes on the driver."""
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        await ctrl.set_buffered(True, batch_size=50)
+        assert ctrl.archive_database._driver.buffered is True
+        assert ctrl.archive_database._driver.buffer_batch_size == 50
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_set_buffered_false_flushes():
+    """set_buffered(False) flushes any pending data."""
+    import datetime
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        await ctrl.set_buffered(True, batch_size=1000)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for i in range(5):
+            await ctrl.store_channel_data(
+                ctrl.StoreChannelDataParams(
+                    channel="pressure",
+                    value={"value": float(i)},
+                    timestamp=now + datetime.timedelta(seconds=i),
+                )
+            )
+        # Data is in buffer, not persisted
+        pending = ctrl.archive_database._driver._pending_count()
+        assert pending == 5
+
+        # Disabling flushes automatically
+        await ctrl.set_buffered(False)
+        assert ctrl.archive_database._driver.buffered is False
+
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="pressure")
+        )
+        assert len(results) == 5
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_flush_buffer_on_controller():
+    """ctrl.flush_buffer() persists buffered data."""
+    import datetime
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        await ctrl.set_buffered(True, batch_size=1000)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for i in range(10):
+            await ctrl.store_channel_data(
+                ctrl.StoreChannelDataParams(
+                    channel="pressure",
+                    value={"value": float(i)},
+                    timestamp=now + datetime.timedelta(seconds=i),
+                )
+            )
+        await ctrl.flush_buffer()
+        results = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="pressure")
+        )
+        assert len(results) == 10
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
+def test_buffered_performance():
+    """Buffered mode is significantly faster than unbuffered for bulk writes."""
+    import datetime
+    import time
+
+    N = 200
+
+    async def _bench(buffered):
+        ctrl = _make_controller_with_channels()
+        if buffered:
+            await ctrl.set_buffered(True, batch_size=100)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        t0 = time.perf_counter()
+        for i in range(N):
+            await ctrl.store_channel_data(
+                ctrl.StoreChannelDataParams(
+                    channel="pressure",
+                    value={"value": float(i)},
+                    timestamp=now + datetime.timedelta(seconds=i),
+                )
+            )
+        if buffered:
+            await ctrl.flush_buffer()
+        elapsed = time.perf_counter() - t0
+        _cleanup_archive(ctrl)
+        return elapsed
+
+    t_unbuf = asyncio.run(_bench(False))
+    t_buf = asyncio.run(_bench(True))
+    # Buffered should be at least 5x faster
+    assert (
+        t_buf < t_unbuf / 5
+    ), f"Buffered ({t_buf:.3f}s) not 5x faster than unbuffered ({t_unbuf:.3f}s)"

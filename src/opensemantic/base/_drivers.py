@@ -24,8 +24,23 @@ _logger = logging.getLogger(__name__)
 class LocalDriver:
     """SQLite backend via aiosqlite."""
 
-    def __init__(self, db_path: Union[str, Path]):
+    def __init__(
+        self,
+        db_path: Union[str, Path],
+        buffered: bool = False,
+        buffer_batch_size: int = 100,
+    ):
         self.db_path = db_path
+        self.buffered = buffered
+        self.buffer_batch_size = buffer_batch_size
+        self._buffer: Dict[str, List[Dict]] = {}
+        self._buffer_lock: Optional[asyncio.Lock] = None
+        if buffered:
+            _logger.info(
+                "LocalDriver: buffered mode enabled (batch_size=%d). "
+                "Call flush_buffer() when done to persist remaining data.",
+                buffer_batch_size,
+            )
 
     async def execute(self, query: str, params: tuple = ()):
         import aiosqlite
@@ -83,8 +98,23 @@ class LocalDriver:
         )
         return [row[0] for row in rows]
 
-    async def write(self, tool_osw_id: str, data: list):
-        # Auto-create table on first write
+    async def flush_buffer(self, tool_osw_id: Optional[str] = None):
+        """Flush buffered writes to SQLite in a single transaction."""
+        if tool_osw_id:
+            data = self._buffer.pop(tool_osw_id, [])
+            if data:
+                _logger.debug("Flushing %d rows for %s", len(data), tool_osw_id)
+                await self._write_immediate(tool_osw_id, data)
+        else:
+            buffer_copy = self._buffer
+            self._buffer = {}
+            for tid, data in buffer_copy.items():
+                if data:
+                    _logger.debug("Flushing %d rows for %s", len(data), tid)
+                    await self._write_immediate(tid, data)
+
+    async def _write_immediate(self, tool_osw_id: str, data: list):
+        """Write rows directly to SQLite in a single transaction."""
         await self.create_tool(tool_osw_id)
         rows = [(row["ts"], row["ch"], json.dumps(row["data"])) for row in data]
         await self.execute_many(
@@ -92,6 +122,23 @@ class LocalDriver:
             f"(ts, ch, data) VALUES (datetime(?,'subsec'), ?, ?);",
             rows,
         )
+
+    def _pending_count(self) -> int:
+        """Return total number of rows pending in the buffer."""
+        return sum(len(v) for v in self._buffer.values())
+
+    async def write(self, tool_osw_id: str, data: list):
+        if self.buffered:
+            if self._buffer_lock is None:
+                self._buffer_lock = asyncio.Lock()
+            async with self._buffer_lock:
+                if tool_osw_id not in self._buffer:
+                    self._buffer[tool_osw_id] = []
+                self._buffer[tool_osw_id].extend(data)
+                if len(self._buffer[tool_osw_id]) >= self.buffer_batch_size:
+                    await self.flush_buffer(tool_osw_id)
+        else:
+            await self._write_immediate(tool_osw_id, data)
 
     async def read(
         self,

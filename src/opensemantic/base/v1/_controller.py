@@ -48,11 +48,17 @@ try:
         """SQLite-based local time series database controller (v1)."""
 
         db_path: Union[str, Path]
+        buffered: bool = False
+        buffer_batch_size: int = 100
         _driver: LocalDriver = PrivateAttr(default=None)
 
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self._driver = LocalDriver(self.db_path)
+            self._driver = LocalDriver(
+                self.db_path,
+                buffered=self.buffered,
+                buffer_batch_size=self.buffer_batch_size,
+            )
 
         async def create_tool(self, params: TSDCMixin.CreateToolParams):
             return await self._driver.create_tool(params.tool_osw_id)
@@ -99,6 +105,9 @@ try:
 
         async def get_table_size(self, tool_osw_id: str) -> int:
             return await self._driver.get_table_size(tool_osw_id)
+
+        async def flush_buffer(self, tool_osw_id: Optional[str] = None):
+            return await self._driver.flush_buffer(tool_osw_id)
 
 except ImportError:
     pass
