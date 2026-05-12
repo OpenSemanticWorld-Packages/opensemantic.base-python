@@ -119,7 +119,13 @@ def resolve_characteristic_class(channel: Any) -> Optional[type]:
     try:
         from oold.model import _types
 
-        return _types.get(iri)
+        cls = _types.get(iri)
+        if cls is not None:
+            return cls
+        # Also check v1 registry (v1 models register separately)
+        from oold.model.v1 import _types as _v1_types
+
+        return _v1_types.get(iri)
     except ImportError:
         return None
 
