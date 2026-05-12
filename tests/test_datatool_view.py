@@ -7,7 +7,13 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 
 from opensemantic import compute_scoped_uuid
-from opensemantic.base.ui._channel_utils import (
+from opensemantic.base.v1 import (
+    Database,
+    DataChannel,
+    DataTool,
+    DataToolController,
+)
+from opensemantic.base.view._channel_utils import (
     build_tree_source,
     get_available_units,
     get_characteristic_iri,
@@ -19,14 +25,8 @@ from opensemantic.base.ui._channel_utils import (
     resolve_characteristic_label,
     resolve_value_type,
 )
-from opensemantic.base.ui._config import DashboardConfig, GroupingMode, PlotConfig
-from opensemantic.base.ui._data_cache import ChannelDataCache, _compute_gaps
-from opensemantic.base.v1 import (
-    Database,
-    DataChannel,
-    DataTool,
-    DataToolController,
-)
+from opensemantic.base.view._config import DashboardConfig, GroupingMode, PlotConfig
+from opensemantic.base.view._data_cache import ChannelDataCache, _compute_gaps
 from opensemantic.characteristics.quantitative.v1 import (
     ForcePerAreaUnit,
     Pressure,

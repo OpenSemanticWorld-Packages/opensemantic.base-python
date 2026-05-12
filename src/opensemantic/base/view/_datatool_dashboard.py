@@ -7,7 +7,7 @@ Provides a Panelini-based view with:
 - JsonEditor for runtime config editing
 
 Usage:
-    from opensemantic.base.ui import DataToolView
+    from opensemantic.base.view import DataToolView
 
     view = DataToolView(controllers=[ctrl1, ctrl2])
     view.servable()
@@ -26,7 +26,7 @@ from panelini import Panelini
 from panelini.panels.jsoneditor import JsonEditor
 from panelini.panels.wunderbaum import Wunderbaum
 
-from opensemantic.base.ui._channel_utils import (
+from opensemantic.base.view._channel_utils import (
     _get_unit_symbol_map,
     _t,
     build_tree_source,
@@ -40,8 +40,8 @@ from opensemantic.base.ui._channel_utils import (
     resolve_characteristic_label,
     resolve_value_type,
 )
-from opensemantic.base.ui._config import DashboardConfig
-from opensemantic.base.ui._data_cache import ChannelDataCache
+from opensemantic.base.view._config import DashboardConfig
+from opensemantic.base.view._data_cache import ChannelDataCache
 
 
 def get_unit_enum_from_value(value: Any) -> Any:

@@ -1,6 +1,6 @@
 """DataTool view UI components."""
 
-from opensemantic.base.ui._channel_utils import (
+from opensemantic.base.view._channel_utils import (
     build_tree_source,
     flatten_composite_channels,
     get_available_units,
@@ -9,13 +9,13 @@ from opensemantic.base.ui._channel_utils import (
     group_channels_by_characteristic,
     resolve_value_type,
 )
-from opensemantic.base.ui._config import (
+from opensemantic.base.view._config import (
     DashboardConfig,
     GroupingMode,
     LangCode,
     PlotConfig,
 )
-from opensemantic.base.ui._datatool_dashboard import DataToolView
+from opensemantic.base.view._datatool_dashboard import DataToolView
 
 __all__ = [
     "DataToolView",

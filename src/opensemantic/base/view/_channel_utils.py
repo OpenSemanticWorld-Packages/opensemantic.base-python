@@ -8,7 +8,7 @@ No UI dependencies (no Panel/Plotly imports).
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
-from opensemantic.base.ui._config import GroupingMode
+from opensemantic.base.view._config import GroupingMode
 
 # -- Display label helpers --
 

@@ -17,14 +17,14 @@ import nest_asyncio
 import panel as pn
 
 from opensemantic import compute_scoped_uuid
-from opensemantic.base.ui import DataToolView
-from opensemantic.base.ui._config import DashboardConfig, PlotConfig
 from opensemantic.base.v1 import (
     Database,
     DataChannel,
     DataTool,
     DataToolController,
 )
+from opensemantic.base.view import DataToolView
+from opensemantic.base.view._config import DashboardConfig, PlotConfig
 from opensemantic.characteristics.quantitative.v1 import (
     Characteristic,
     ForcePerAreaUnit,
