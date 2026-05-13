@@ -136,6 +136,8 @@ view.servable()  # for panel serve
 
 See [examples/datatool_dashboard.py](examples/datatool_dashboard.py) for a full working example.
 
+To regenerate the screenshots after UI changes, see [docs/generate_screenshots.py](docs/generate_screenshots.py).
+
 ## Installation
 
 ```bash

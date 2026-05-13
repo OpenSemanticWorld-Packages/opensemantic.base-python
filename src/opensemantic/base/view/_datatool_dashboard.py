@@ -275,7 +275,9 @@ class DataToolView:
     # -- Plot --
 
     def _build_plot(self):
-        self._plot_col = pn.Column(sizing_mode="stretch_width", scroll=True)
+        self._plot_col = pn.Column(
+            sizing_mode="stretch_width", scroll=True, max_height=600
+        )
         self._plot_card = pn.Card(
             self._plot_col,
             title=_t("time_series", self.lang),
@@ -284,9 +286,14 @@ class DataToolView:
 
     def _build_log_console(self):
         self._log_data = []
-        self._log_pane = pn.pane.HTML("", sizing_mode="stretch_width")
+        self._log_pane = pn.pane.HTML(
+            "",
+            sizing_mode="stretch_width",
+            height=200,
+            styles={"overflow-y": "auto"},
+        )
         self._log_card = pn.Card(
-            pn.Column(self._log_pane, scroll=True, max_height=200),
+            self._log_pane,
             title=_t("log_console", self.lang),
             collapsed=False,
             visible=False,
@@ -390,7 +397,8 @@ class DataToolView:
     async def _load_and_plot(self):
         """Load data for all selected channels and update plots."""
         start = self._start_picker.value
-        end = self._end_picker.value
+        # Use current time as end when auto-fetching so new data is included
+        end = dt.datetime.now() if self._auto_fetch_cb.value else self._end_picker.value
         if start is None or end is None:
             return
 

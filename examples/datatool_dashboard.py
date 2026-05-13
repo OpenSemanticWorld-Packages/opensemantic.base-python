@@ -192,8 +192,8 @@ async def setup_data():
                 timestamp=ts,
             )
         )
-        # Text channel: status messages every 10 points
-        if i % 10 == 0:
+        # Text channel: status messages every 3 points
+        if i % 3 == 0:
             messages = [
                 "OK",
                 "Warning: high temp",
