@@ -757,7 +757,7 @@ def test_datatool_controller_explicit_archive_not_overwritten():
     explicit = LocalTimeSeriesDatabaseController(
         name="explicit",
         label=[Label(text="Explicit")],
-        db_path="./explicit_test.sqlite",
+        db_path=tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False).name,
     )
     dt = DataToolController(
         name="test",
@@ -780,7 +780,7 @@ def test_datatool_controller_handle_data_change():
     archive = LocalTimeSeriesDatabaseController(
         name="hdc_test",
         label=[Label(text="Test")],
-        db_path="./hdc_test.sqlite",
+        db_path=tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False).name,
     )
     dt = DataToolController(
         name="test",
@@ -819,8 +819,9 @@ def test_datatool_controller_handle_data_change():
 
     import os
 
-    if os.path.exists("./hdc_test.sqlite"):
-        os.unlink("./hdc_test.sqlite")
+    db_path = archive.db_path
+    if os.path.exists(db_path):
+        os.unlink(db_path)
 
 
 def test_datatool_controller_typed_write_read():
@@ -843,7 +844,7 @@ def test_datatool_controller_typed_write_read():
     archive = LocalTimeSeriesDatabaseController(
         name="typed_base_test",
         label=[Label(text="Test")],
-        db_path="./typed_base_test.sqlite",
+        db_path=tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False).name,
     )
     dt = DataToolController(
         name="test",
@@ -878,8 +879,9 @@ def test_datatool_controller_typed_write_read():
 
     import os
 
-    if os.path.exists("./typed_base_test.sqlite"):
-        os.unlink("./typed_base_test.sqlite")
+    db_path = archive.db_path
+    if os.path.exists(db_path):
+        os.unlink(db_path)
 
 
 def test_datatool_controller_configure_auto_archive():
@@ -894,7 +896,7 @@ def test_datatool_controller_configure_auto_archive():
     archive = LocalTimeSeriesDatabaseController(
         name="cfg_test",
         label=[Label(text="Test")],
-        db_path="./cfg_test.sqlite",
+        db_path=tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False).name,
     )
     dt = DataToolController(
         name="test",
@@ -912,8 +914,9 @@ def test_datatool_controller_configure_auto_archive():
 
     import os
 
-    if os.path.exists("./cfg_test.sqlite"):
-        os.unlink("./cfg_test.sqlite")
+    db_path = archive.db_path
+    if os.path.exists(db_path):
+        os.unlink(db_path)
 
 
 # -- store_channel_data / load_channel_data tests --
@@ -1178,7 +1181,7 @@ def test_v2_datatool_store_load_auto_typed():
     archive = LocalTimeSeriesDatabaseController(
         name="v2test",
         label=[Label(text="V2 Archive")],
-        db_path="./v2test.sqlite",
+        db_path=tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False).name,
     )
     ctrl = DataToolController(dt)
     ctrl.archive_database = archive
