@@ -79,10 +79,15 @@ class DataToolView:
         controllers: Optional[List[Any]] = None,
         config: Optional[DashboardConfig] = None,
         title: str = "DataTool Dashboard",
+        embeddable: bool = False,
     ):
         self._controllers = controllers or []
         self._config = config or DashboardConfig()
         self._title = title
+        # When embeddable, skip building the internal Panelini app so the cards
+        # can be placed into a host app via sidebar_cards / main_cards (Panel
+        # rejects the same model living in two layouts/documents).
+        self._embeddable = embeddable
 
         # Build lookup maps
         self._channel_map: Dict[str, Any] = {}
@@ -675,6 +680,10 @@ class DataToolView:
     # -- Layout --
 
     def _build_layout(self):
+        if self._embeddable:
+            # Host app owns the layout; expose cards via sidebar_cards/main_cards.
+            self._app = None
+            return
         self._app = Panelini(
             title=self._title,
             sidebar_enabled=True,
@@ -693,8 +702,47 @@ class DataToolView:
         """Set main area content. Override in subclasses for tabs."""
         self._app.main_set([self._plot_card, self._log_card])
 
+    @property
+    def sidebar_cards(self):
+        """Sidebar cards (channel tree, plot controls, config) for embedding."""
+        return [self._tree_card, self._controls_card, self._config_card]
+
+    @property
+    def main_cards(self):
+        """Main-area cards (time series plot, log console) for embedding."""
+        return [self._plot_card, self._log_card]
+
+    def set_time_range(self, start, end, fetch: bool = True):
+        """Set an explicit time range and (optionally) reload the data.
+
+        Accepts tz-aware or naive datetimes (naive is treated as UTC). Disables
+        auto-fetch, which otherwise pins the end to ``now``, so an arbitrary
+        historical window can be shown.
+        """
+        self._auto_fetch_cb.value = False
+        self._start_picker.value = self._to_picker_value(start)
+        self._end_picker.value = self._to_picker_value(end)
+        if fetch:
+            self._trigger_load()
+
+    @staticmethod
+    def _to_picker_value(value):
+        """Convert a datetime to the naive local value the picker expects.
+
+        The DatetimePicker holds naive local time which _load_and_plot converts
+        back to UTC, so hand it the local-naive representation of ``value``.
+        """
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=dt.timezone.utc)
+        return value.astimezone().replace(tzinfo=None)
+
     def servable(self, **kwargs):
         """Make the dashboard servable."""
+        if self._app is None:
+            raise RuntimeError(
+                "DataToolView(embeddable=True) has no servable app; "
+                "place sidebar_cards / main_cards into a host app instead."
+            )
         return self._app.servable(**kwargs)
 
     def panel(self):
