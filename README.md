@@ -24,6 +24,22 @@ opensemantic.base/
   v1/                   # same structure for Pydantic v1
 ```
 
+### Data model
+
+A `DataTool` instance is typed by the `DataTool` category, carries its data
+channels (each typed by a characteristic), and references its storage:
+
+```mermaid
+graph LR
+    probeA["probeA<br/>(DataTool instance)"]
+    probeA -- HasType --> DataTool["DataTool"]
+    probeA -- HasStorageLocation --> archive["archive<br/>(Database)"]
+    probeA -- HasDataChannel --> temp[":temp"]
+    probeA -- HasDataChannel --> pressure[":pressure"]
+    temp -- HasCharacteristic --> Temperature["Temperature"]
+    pressure -- HasCharacteristic --> Pressure["Pressure"]
+```
+
 ## DataToolController
 
 Extends DataTool with channel management, subdevice traversal, and data archiving.
@@ -144,6 +160,22 @@ Where `DataToolView` is centered on data tools, `ProcessObjectView` is centered
 on the **objects** (samples, specimens, ... - any `Item`) that pass through
 processes. It answers *"how did measurement X compare across the runs my objects
 went through?"* by overlaying repeated runs on a common, time-normalized axis.
+
+The view walks these relations - an object is a process *input*, a process
+*uses* data tools, and a data tool *has* channels:
+
+```mermaid
+graph LR
+    process[":process"]
+    process -- HasInput --> sample["sample (Item)<br/>the 'object'"]
+    process -- HasTool --> probeA["probeA<br/>(DataTool)"]
+    process -- HasStartDateAndTime --> startTime["start_date_time"]
+    process -- HasEndDateAndTime --> endTime["end_date_time"]
+    probeA -- HasDataChannel --> channels[":temp, :pressure"]
+```
+
+`start_date_time` / `end_date_time` define each run's plot window; the view
+normalizes every run to its first data point (t=0).
 
 ![Process Demo](docs/process_demo.gif)
 
