@@ -1,0 +1,498 @@
+"""Process/object-centered DataTool view.
+
+Two Wunderbaum trees:
+- Objects (Item instances tracked as process inputs)
+- Process types -> aggregated channels (grouped by datatool type, channel name,
+  characteristic)
+
+Selected object x aggregated-channel pairs resolve to concrete channels, are
+loaded over each process's [start, end] window, time-normalized so the first
+data point of each process is t=0, and plotted (seconds on the x-axis) grouped
+by characteristic - reusing the plot/group/unit machinery of DataToolView.
+
+Usage:
+    from opensemantic.base.view import ProcessObjectView
+
+    view = ProcessObjectView(objects, processes, controllers)
+    view.servable()
+"""
+
+import datetime as dt
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+import panel as pn
+from bokeh.models import ColumnDataSource
+from bokeh.plotting import figure as bk_figure
+from panelini import Panelini
+from panelini.panels.wunderbaum import Wunderbaum
+
+from opensemantic.base.view._base_view import COLORS, BaseDataView
+from opensemantic.base.view._channel_utils import (
+    _t,
+    get_display_label,
+    group_channels_by_characteristic,
+    resolve_value_type,
+)
+from opensemantic.base.view._config import DashboardConfig
+from opensemantic.base.view._data_cache import ChannelDataCache
+from opensemantic.base.view._process_utils import (
+    build_concrete_tree,
+    build_object_tree_source,
+    build_process_tree_source,
+    derive_aggregated_channels,
+    entity_iri,
+    get_selected_keys,
+    resolve_aggregated_channel,
+)
+
+_logger = logging.getLogger(__name__)
+
+# Local labels not in the shared _channel_utils translation table.
+_PT_STRINGS = {
+    "objects": {"en": "Objects", "de": "Objekte"},
+    "process_channels": {
+        "en": "Process Types / Channels",
+        "de": "Prozesstypen / Kanaele",
+    },
+    "rel_time": {"en": "t [s] (relative)", "de": "t [s] (relativ)"},
+    "n_processes": {"en": "#", "de": "#"},
+}
+
+
+def _pt(key: str, lang: str = "en") -> str:
+    entry = _PT_STRINGS.get(key, {})
+    return entry.get(lang, entry.get("en", key))
+
+
+def _as_utc(value: Any) -> Optional[dt.datetime]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = dt.datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value
+
+
+class ProcessObjectView(BaseDataView):
+    """Process/object-centered archive view.
+
+    Parameters
+    ----------
+    objects
+        Item instances (the entities tracked as process inputs) shown in tree 1.
+    processes
+        Process instances to scan. A process qualifies when one of ``objects``
+        is among its inputs, it has start+end times, and >=1 DataTool attached.
+    controllers
+        DataToolController instances used to load channel data; matched to
+        process tools by IRI.
+    config
+        Dashboard configuration (uses ``lang`` and ``plot.*``). If None, defaults.
+    title
+        Dashboard title shown in the Panelini header.
+    embeddable
+        If True, skip the internal Panelini app (expose ``sidebar_cards`` /
+        ``main_cards`` for a host app instead).
+    """
+
+    def __init__(
+        self,
+        objects: Optional[List[Any]] = None,
+        processes: Optional[List[Any]] = None,
+        controllers: Optional[List[Any]] = None,
+        config: Optional[DashboardConfig] = None,
+        title: str = "Process Dashboard",
+        embeddable: bool = False,
+    ):
+        self._objects = objects or []
+        self._processes = processes or []
+        self._controllers = controllers or []
+        self._config = config or DashboardConfig()
+        self._title = title
+        self._embeddable = embeddable
+
+        # Virtual structure
+        self._concrete = build_concrete_tree(
+            self._objects, self._processes, self._controllers, self.lang
+        )
+        self._aggregated = derive_aggregated_channels(self._concrete, self.lang)
+        self._agg_by_key: Dict[str, Dict[str, Any]] = {}
+        for grp in self._aggregated.values():
+            for agg in grp["channels"].values():
+                self._agg_by_key[agg["key"]] = agg
+
+        # State
+        self._cache = ChannelDataCache(enabled=self._config.plot.cache_enabled)
+        self._selected_objects: List[Dict[str, Any]] = []
+        self._selected_aggs: List[Dict[str, Any]] = []
+        self._groups: Dict[str, List[Tuple[Any, Any]]] = {}
+        self._group_of: Dict[str, str] = {}
+        self._unit_selections: Dict[str, str] = {}
+        self._traces: List[Dict[str, Any]] = []
+        self._t0: Dict[Tuple[Any, Any], dt.datetime] = {}
+
+        # UI
+        self._build_object_tree()
+        self._build_process_tree()
+        self._build_controls()
+        self._build_plot()
+        self._build_log_console()
+        self._build_config_editor()
+        self._build_layout()
+
+    # -- Trees --
+
+    def _build_object_tree(self):
+        source = build_object_tree_source(self._concrete, self.lang)
+        self._obj_tree = Wunderbaum(
+            source=source,
+            height=220,
+            columns=[
+                {"id": "*", "title": _pt("objects", self.lang), "width": "200px"},
+                {
+                    "id": "processes",
+                    "title": _pt("n_processes", self.lang),
+                    "width": "60px",
+                },
+            ],
+            options={"checkbox": True, "selectMode": "hier"},
+        )
+        self._obj_tree.param.watch(self._on_change, ["source"])
+        self._obj_tree_card = pn.Card(
+            self._obj_tree,
+            title=_pt("objects", self.lang),
+            collapsed=False,
+        )
+
+    def _build_process_tree(self):
+        source = build_process_tree_source(self._aggregated, self.lang)
+        self._proc_tree = Wunderbaum(
+            source=source,
+            height=220,
+            columns=[
+                {
+                    "id": "*",
+                    "title": _pt("process_channels", self.lang),
+                    "width": "220px",
+                },
+                {
+                    "id": "characteristic",
+                    "title": _t("characteristic", self.lang),
+                    "width": "150px",
+                },
+            ],
+            options={"checkbox": True, "selectMode": "hier"},
+        )
+        self._proc_tree.param.watch(self._on_change, ["source"])
+        self._proc_tree_card = pn.Card(
+            self._proc_tree,
+            title=_pt("process_channels", self.lang),
+            collapsed=False,
+        )
+
+    def _on_change(self, *args):
+        try:
+            self._recompute_selection()
+            self._update_unit_controls()
+            if self._config.plot.auto_fetch:
+                self._trigger_load()
+        except Exception as e:
+            _logger.error("Error in _on_change: %s", e)
+
+    def _recompute_selection(self):
+        obj_keys = get_selected_keys(self._obj_tree.source)
+        agg_keys = get_selected_keys(self._proc_tree.source)
+        self._selected_objects = [
+            self._concrete[k] for k in obj_keys if k in self._concrete
+        ]
+        self._selected_aggs = [
+            self._agg_by_key[k] for k in agg_keys if k in self._agg_by_key
+        ]
+        # Unique concrete (controller, channel) pairs for y-axis grouping
+        pairs: Dict[str, Tuple[Any, Any]] = {}
+        for obj_entry in self._selected_objects:
+            for agg in self._selected_aggs:
+                for ctrl, ch, _proc in resolve_aggregated_channel(obj_entry, agg):
+                    pairs[ch.uuid] = (ctrl, ch)
+        self._groups = group_channels_by_characteristic(
+            list(pairs.values()), self._config.plot.grouping
+        )
+        self._group_of = {}
+        for gkey, chans in self._groups.items():
+            for _ctrl, ch in chans:
+                self._group_of[ch.uuid] = gkey
+
+    # -- Controls --
+
+    def _build_controls(self):
+        self._load_button = pn.widgets.Button(
+            name=_t("load_data", self.lang), button_type="primary"
+        )
+        self._load_button.on_click(lambda e: self._trigger_load())
+
+        self._auto_fetch_cb = pn.widgets.Checkbox(
+            name=_t("auto_fetch", self.lang),
+            value=self._config.plot.auto_fetch,
+        )
+        self._auto_fetch_cb.param.watch(self._on_auto_fetch_change, ["value"])
+
+        self._row_limit_input = pn.widgets.IntInput(
+            name=_t("row_limit", self.lang),
+            value=self._config.plot.row_limit,
+            start=1,
+            step=1000,
+        )
+        self._row_limit_input.param.watch(self._on_row_limit_change, ["value"])
+
+        self._clear_cache_button = pn.widgets.Button(
+            name=_t("clear_cache", self.lang), button_type="warning"
+        )
+        self._clear_cache_button.on_click(self._on_clear_cache)
+
+        self._unit_controls = pn.Column()
+
+        self._controls_card = pn.Card(
+            self._load_button,
+            self._auto_fetch_cb,
+            self._row_limit_input,
+            self._clear_cache_button,
+            self._unit_controls,
+            title=_t("plot_controls", self.lang),
+        )
+
+    def _on_auto_fetch_change(self, event):
+        self._config.plot.auto_fetch = event.new
+
+    def _on_row_limit_change(self, event):
+        self._config.plot.row_limit = event.new
+
+    def _on_clear_cache(self, event):
+        self._cache.clear_cache()
+
+    # -- Config editor change handler (view-specific) --
+
+    def _on_config_editor_change(self, event):
+        if not event.new or not isinstance(event.new, dict):
+            return
+        try:
+            new_config = DashboardConfig.model_validate(event.new)
+        except Exception as e:
+            _logger.debug("Incomplete config value, skipping: %s", e)
+            return
+        old_config = self._config
+        self._config = new_config
+
+        if old_config.plot.grouping != new_config.plot.grouping:
+            self._recompute_selection()
+            self._update_unit_controls()
+            self._refresh_plot()
+        if old_config.plot.cache_enabled != new_config.plot.cache_enabled:
+            self._cache.enabled = new_config.plot.cache_enabled
+        self._auto_fetch_cb.value = new_config.plot.auto_fetch
+        self._row_limit_input.value = new_config.plot.row_limit
+
+    # -- Data loading (_trigger_load comes from BaseDataView) --
+
+    async def _load_and_plot(self):
+        limit = self._config.plot.row_limit
+        self._traces = []
+
+        for obj_entry in self._selected_objects:
+            for agg in self._selected_aggs:
+                for ctrl, ch, proc in resolve_aggregated_channel(obj_entry, agg):
+                    start = _as_utc(getattr(proc, "start_date_time", None))
+                    end = _as_utc(getattr(proc, "end_date_time", None))
+                    if start is None:
+                        continue
+                    try:
+                        points = await self._cache.get_data(ctrl, ch, start, end, limit)
+                    except Exception as e:
+                        _logger.error(
+                            "Error loading %s/%s: %s",
+                            getattr(ctrl, "name", "?"),
+                            getattr(ch, "name", "?"),
+                            e,
+                        )
+                        points = []
+                    self._traces.append(
+                        {
+                            "object": obj_entry["object"],
+                            "object_label": obj_entry["label"],
+                            "process": proc,
+                            "process_label": get_display_label(proc, self.lang),
+                            "controller": ctrl,
+                            "channel": ch,
+                            "points": points,
+                        }
+                    )
+
+        # t=0 per (object, process) = earliest loaded point across its channels
+        self._t0 = {}
+        for tr in self._traces:
+            if not tr["points"]:
+                continue
+            key = (entity_iri(tr["object"]), entity_iri(tr["process"]))
+            mn = min(_as_utc(p.timestamp) for p in tr["points"])
+            cur = self._t0.get(key)
+            if cur is None or mn < cur:
+                self._t0[key] = mn
+
+        self._refresh_plot()
+
+    def _build_figure(self):
+        self._plot_col.clear()
+
+        # Group traces by y-axis group, skipping text channels.
+        plot_groups: Dict[str, List[Dict[str, Any]]] = {}
+        for tr in self._traces:
+            ch = tr["channel"]
+            if resolve_value_type(ch) == "text":
+                continue
+            gkey = self._group_of.get(ch.uuid)
+            if gkey is None:
+                continue
+            plot_groups.setdefault(gkey, []).append(tr)
+
+        if not plot_groups:
+            return
+
+        color_idx = 0
+        for gkey, traces in plot_groups.items():
+            axis_label = self._get_axis_label(gkey)
+            fig = bk_figure(
+                height=250,
+                sizing_mode="stretch_width",
+                x_axis_label=_pt("rel_time", self.lang),
+                y_axis_label=axis_label,
+            )
+            for tr in traces:
+                xs, ys = self._extract_trace(tr, gkey)
+                if not xs:
+                    continue
+                # One aggregated channel fans out to every real channel each
+                # sample has data on (across process runs and across datatools
+                # of the same type). Label each line distinctly by
+                # object · process / datatool / channel so Bokeh keeps them as
+                # separate, individually-toggleable legend entries.
+                label = (
+                    f"{tr['object_label']} · {tr['process_label']} / "
+                    f"{get_display_label(tr['controller'], self.lang)} / "
+                    f"{get_display_label(tr['channel'], self.lang)}"
+                )
+                src = ColumnDataSource(data={"x": xs, "y": ys})
+                fig.line(
+                    "x",
+                    "y",
+                    source=src,
+                    legend_label=label,
+                    color=COLORS[color_idx % len(COLORS)],
+                    line_width=2,
+                )
+                color_idx += 1
+            fig.legend.click_policy = "hide"
+            fig.legend.label_text_font_size = "8pt"
+            self._plot_col.append(pn.pane.Bokeh(fig, sizing_mode="stretch_width"))
+
+    def _extract_trace(self, tr: Dict[str, Any], group_key: str) -> Tuple[List, List]:
+        """Relative-seconds x and (unit-converted) numeric y for a trace."""
+        points = tr["points"]
+        if not points:
+            return [], []
+        key = (entity_iri(tr["object"]), entity_iri(tr["process"]))
+        t0 = self._t0.get(key)
+        if t0 is None:
+            return [], []
+
+        ch = tr["channel"]
+        target_unit_name = self._unit_selections.get(group_key)
+        xs: List[float] = []
+        ys: List[Any] = []
+
+        for pt in points:
+            ts = _as_utc(pt.timestamp)
+            secs = (ts - t0).total_seconds()
+            v = self._numeric(pt.value, ch, target_unit_name)
+            if v is None:
+                continue
+            xs.append(secs)
+            ys.append(v)
+
+        return xs, ys
+
+    def _update_log_console(self):
+        log_entries = []
+        has_text = False
+        for tr in self._traces:
+            ch = tr["channel"]
+            if resolve_value_type(ch) != "text":
+                continue
+            has_text = True
+            key = (entity_iri(tr["object"]), entity_iri(tr["process"]))
+            t0 = self._t0.get(key)
+            prefix = f"{tr['object_label']} · {tr['process_label']}"
+            for pt in tr["points"]:
+                ts = _as_utc(pt.timestamp)
+                secs = (ts - t0).total_seconds() if t0 is not None else 0.0
+                val = pt.value
+                if hasattr(val, "value"):
+                    text = str(val.value)
+                elif isinstance(val, dict):
+                    text = str(val.get("value", val))
+                else:
+                    text = str(val)
+                log_entries.append((secs, prefix, text))
+
+        self._log_card.visible = has_text
+        if not log_entries:
+            self._log_pane.object = ""
+            return
+
+        log_entries.sort(key=lambda x: x[0])
+        html_lines = []
+        for secs, prefix, text in log_entries:
+            html_lines.append(
+                "<div style='font-family:monospace; font-size:12px;'>"
+                f"<span style='color:#888'>+{secs:.1f}s</span> "
+                f"<span style='color:#1f77b4'>[{prefix}]</span> {text}</div>"
+            )
+        self._log_pane.object = "\n".join(html_lines)
+
+    # -- Layout --
+
+    def _build_layout(self):
+        if self._embeddable:
+            self._app = None
+            return
+        self._app = Panelini(
+            title=self._title,
+            sidebar_enabled=True,
+            sidebars_max_width=400,
+        )
+        self._app.sidebar_set(
+            [
+                self._obj_tree_card,
+                self._proc_tree_card,
+                self._controls_card,
+                self._config_card,
+            ]
+        )
+        self._app.main_set([self._plot_card, self._log_card])
+
+    @property
+    def sidebar_cards(self):
+        """Sidebar cards (object tree, process tree, controls, config)."""
+        return [
+            self._obj_tree_card,
+            self._proc_tree_card,
+            self._controls_card,
+            self._config_card,
+        ]
+
+    @property
+    def main_cards(self):
+        """Main-area cards (time series plot, log console)."""
+        return [self._plot_card, self._log_card]
+
+    # servable() / panel() come from BaseDataView.
