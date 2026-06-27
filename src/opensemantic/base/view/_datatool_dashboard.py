@@ -13,31 +13,24 @@ Usage:
     view.servable()
 """
 
-import asyncio
 import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import panel as pn
 from bokeh.models import ColumnDataSource, DatetimeTickFormatter
-from bokeh.palettes import Category10_10
 from bokeh.plotting import figure as bk_figure
 from panelini import Panelini
-from panelini.panels.jsoneditor import JsonEditor
 from panelini.panels.wunderbaum import Wunderbaum
 
+from opensemantic.base.view._base_view import COLORS, BaseDataView
 from opensemantic.base.view._channel_utils import (
-    _get_unit_symbol_map,
     _t,
     build_tree_source,
     flatten_composite_channels,
-    get_available_units,
     get_display_label,
     get_selected_channels,
-    get_unit_enum,
     group_channels_by_characteristic,
-    resolve_characteristic_class,
-    resolve_characteristic_label,
     resolve_value_type,
 )
 from opensemantic.base.view._config import DashboardConfig
@@ -54,10 +47,8 @@ def get_unit_enum_from_value(value: Any) -> Any:
 
 _logger = logging.getLogger(__name__)
 
-COLORS = Category10_10
 
-
-class DataToolView:
+class DataToolView(BaseDataView):
     """Archive-mode DataTool view.
 
     Displays multiple DataToolControllers in a TreeGrid sidebar.
@@ -111,10 +102,6 @@ class DataToolView:
         self._build_log_console()
         self._build_config_editor()
         self._build_layout()
-
-    @property
-    def lang(self) -> str:
-        return self._config.lang
 
     def _build_lookup_maps(self):
         for ctrl in self._controllers:
@@ -244,90 +231,7 @@ class DataToolView:
         self._cache.clear_cache()
         self._cached_data.clear()
 
-    def _update_unit_controls(self):
-        self._unit_controls.clear()
-        for group_key, channels in self._groups.items():
-            if not channels:
-                continue
-            sample_ch = channels[0][1]
-            vtype = resolve_value_type(sample_ch)
-            if vtype != "quantity":
-                continue
-            units = get_available_units(sample_ch)
-            if not units:
-                continue
-            char_label = resolve_characteristic_label(sample_ch, self.lang)
-            current = self._unit_selections.get(group_key)
-            options = {u["symbol"]: u["name"] for u in units}
-            if current not in options.values():
-                current = next(iter(options.values()))
-                self._unit_selections[group_key] = current
-            dropdown = pn.widgets.Select(
-                name=f"{_t('unit', self.lang)}: {char_label}",
-                options=options,
-                value=current,
-            )
-            dropdown.param.watch(
-                lambda event, _key=group_key: self._on_unit_change(_key, event),
-                ["value"],
-            )
-            self._unit_controls.append(dropdown)
-
-    def _on_unit_change(self, group_key: str, event):
-        self._unit_selections[group_key] = event.new
-        self._refresh_plot()
-
-    # -- Plot --
-
-    def _build_plot(self):
-        self._plot_col = pn.Column(
-            sizing_mode="stretch_width", scroll=True, max_height=600
-        )
-        self._plot_card = pn.Card(
-            self._plot_col,
-            title=_t("time_series", self.lang),
-            sizing_mode="stretch_width",
-        )
-
-    def _build_log_console(self):
-        self._log_data = []
-        self._log_pane = pn.pane.HTML(
-            "",
-            sizing_mode="stretch_width",
-            height=200,
-            styles={"overflow-y": "auto"},
-        )
-        self._log_card = pn.Card(
-            self._log_pane,
-            title=_t("log_console", self.lang),
-            collapsed=False,
-            visible=False,
-            sizing_mode="stretch_width",
-        )
-
-    # -- Config Editor --
-
-    def _build_config_editor(self):
-        schema = self._config.model_json_schema()
-        self._config_editor = JsonEditor(
-            value=self._config.model_dump(),
-            options={
-                "schema": schema,
-                "no_additional_properties": True,
-                "disable_edit_json": False,
-            },
-        )
-        self._config_editor.param.watch(self._on_config_editor_change, ["value"])
-        self._config_card = pn.Card(
-            pn.Column(
-                self._config_editor,
-                sizing_mode="stretch_width",
-                max_height=1000,
-                scroll=True,
-            ),
-            title=_t("config", self.lang),
-            collapsed=True,
-        )
+    # -- Config editor change handler (view-specific) --
 
     def _on_config_editor_change(self, event):
         if not event.new or not isinstance(event.new, dict):
@@ -388,16 +292,7 @@ class DataToolView:
         # Rebuild unit controls
         self._update_unit_controls()
 
-    # -- Data Loading --
-
-    def _trigger_load(self):
-        """Start data loading (handles async context)."""
-        _logger.debug("_trigger_load called, %d selected", len(self._selected))
-        try:
-            asyncio.get_running_loop()
-            asyncio.ensure_future(self._load_and_plot())
-        except RuntimeError:
-            asyncio.run(self._load_and_plot())
+    # -- Data Loading (_trigger_load comes from BaseDataView) --
 
     async def _load_and_plot(self):
         """Load data for all selected channels and update plots."""
@@ -436,11 +331,6 @@ class DataToolView:
                 _logger.error("Error loading %s/%s: %s", ctrl.name, ch.name, e)
 
         self._refresh_plot()
-
-    def _refresh_plot(self):
-        """Rebuild plot and log console from cached data."""
-        self._build_figure()
-        self._update_log_console()
 
     def _build_figure(self):
         """Build Bokeh figures - one per characteristic group."""
@@ -522,23 +412,7 @@ class DataToolView:
             if ts.tzinfo is not None:
                 ts = ts.astimezone(tz=None).replace(tzinfo=None)
             timestamps.append(ts)
-
-            value = pt.value
-            # Convert to display unit if needed
-            if target_unit_name and hasattr(value, "to_unit"):
-                unit_enum = get_unit_enum(ch)
-                if unit_enum is not None and target_unit_name in unit_enum.__members__:
-                    try:
-                        value = value.to_unit(unit_enum[target_unit_name])
-                    except Exception:
-                        pass
-            # Extract numeric value
-            if hasattr(value, "value"):
-                values.append(value.value)
-            elif isinstance(value, dict):
-                values.append(value.get("value", 0))
-            else:
-                values.append(value)
+            values.append(self._numeric(pt.value, ch, target_unit_name))
 
         return timestamps, values
 
@@ -599,39 +473,6 @@ class DataToolView:
                 values.append(sub)
 
         return timestamps, values
-
-    def _get_axis_label(self, group_key: str) -> str:
-        """Build y-axis label: characteristic name [unit symbol].
-
-        Uses the selected unit if set, otherwise the channel's configured unit.
-        """
-        channels = self._groups.get(group_key, [])
-        if not channels:
-            return ""
-        sample_ch = channels[0][1]
-        char_label = resolve_characteristic_label(sample_ch, self.lang)
-
-        # Try selected unit first
-        unit_name = self._unit_selections.get(group_key)
-        if unit_name:
-            units = get_available_units(sample_ch)
-            for u in units:
-                if u["name"] == unit_name:
-                    return f"{char_label} [{u['symbol']}]"
-
-        # Fall back to channel's configured unit
-        ch_unit = getattr(sample_ch, "unit", None)
-        if ch_unit:
-            cls = resolve_characteristic_class(sample_ch)
-            symbol_map = _get_unit_symbol_map(cls)
-            unit_enum = get_unit_enum(sample_ch)
-            if unit_enum:
-                for member in unit_enum:
-                    if member.value == ch_unit or member.name == ch_unit:
-                        symbol = symbol_map.get(member.name, member.name)
-                        return f"{char_label} [{symbol}]"
-
-        return char_label
 
     def _update_log_console(self):
         """Update the log console with text-type channel data."""
@@ -736,15 +577,4 @@ class DataToolView:
             value = value.replace(tzinfo=dt.timezone.utc)
         return value.astimezone().replace(tzinfo=None)
 
-    def servable(self, **kwargs):
-        """Make the dashboard servable."""
-        if self._app is None:
-            raise RuntimeError(
-                "DataToolView(embeddable=True) has no servable app; "
-                "place sidebar_cards / main_cards into a host app instead."
-            )
-        return self._app.servable(**kwargs)
-
-    def panel(self):
-        """Return the Panelini app for embedding."""
-        return self._app
+    # servable() / panel() come from BaseDataView.

@@ -1,27 +1,47 @@
-"""Example: Process/object-centered archive view.
+"""Example: process/object-centered archive view (``ProcessObjectView``).
 
-The aggregated "virtual" channel in tree 2 is only a treeview collapse - it
-merges the same channel across datatool instances of the same type so you
-select it once. When plotted, that single selection fans out to **every real
-channel each selected sample has data on**, across two axes:
+Where ``DataToolView`` is centered on data tools, this view is centered on the
+**objects** that pass through processes (samples, specimens, ...). It answers
+"how did measurement X compare across the runs my objects went through?"
 
-- multiple process runs of the same type (e.g. a sample evacuated twice), and
-- multiple datatools of the same type within a run (e.g. two probes).
+Two trees drive the plot:
 
-Each resulting line is normalized so its first data point is t=0, and gets a
-distinct legend entry (object / process / datatool / channel).
+1. **Objects** - the ``Item`` instances you want to compare.
+2. **Process types -> channels** - for each type of process the objects went
+   through, the channels of the data tools used in those runs.
 
-Treeview aggregation is co-presence aware: two same-type datatools that run
-together in a process are kept as separate entries; ones that only ever appear
-in different runs (drop-in replacements) are merged into one entry. Here:
-- Evacuation always runs both probes together -> separate per-instance entries;
-- Heating swaps the probe between runs -> one merged "DataTool/... [2 channels]"
-  entry (tooltip lists the actual channels).
+Tree 2 is *aggregated for selection only*: instead of ticking the same channel
+on every run and every tool, you tick it once. The aggregation is co-presence
+aware:
 
-Run with: panel serve examples/process_dashboard.py --dev
+- data tools of the same type that run **together** in a process stay as
+  **separate** entries (distinct measurement points);
+- data tools that only ever appear in **different** runs are treated as drop-in
+  replacements and **merged** into one entry, shown as
+  ``<type>/<channel> [n channels]`` with the actual channels in its tooltip.
 
-Check a sample (tree 1) and a channel under a process type (tree 2): one line
-appears per (run x datatool) the sample has data on, all from t=0.
+Selecting an object + a channel entry then plots **every real channel that
+object has data on** for it - fanning out across process runs and across
+co-present tools. Each line is time-normalized to its own run (first data point
+at t=0, x-axis in seconds) and grouped by characteristic, so repeated runs and
+different objects overlay for direct comparison. Every line gets a distinct
+legend entry (object / process / data tool / channel).
+
+This example shows both aggregation cases with two probes of the same type:
+
+- **Evacuation** runs both probes together  -> separate per-instance entries
+  (``FurnaceProbe-A/temp``, ``FurnaceProbe-B/temp``);
+- **Heating** swaps the probe between runs   -> one merged entry
+  (``DataTool/temp [2 channels]``).
+
+Sample 1 ran Evacuation twice, so selecting it + ``temp`` overlays both runs.
+
+Run with::
+
+    panel serve examples/process_dashboard.py --dev
+
+A commented block at the bottom shows how to populate the same view from an
+OpenSemanticLab instance instead of the local data built here.
 """
 
 import asyncio
