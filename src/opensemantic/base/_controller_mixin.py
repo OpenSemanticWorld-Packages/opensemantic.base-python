@@ -20,6 +20,37 @@ from pydantic import BaseModel, ConfigDict
 _logger = logging.getLogger(__name__)
 
 
+class DownsampleParams(BaseModel):
+    """Server-side downsampling request (PostgREST/TimescaleDB backend).
+
+    Grouped into one sub-object so the read/load params stay tidy. Honored by
+    backends that support it; others ignore or approximate it. All-None (or a
+    None ``DownsampleParams``) means no downsampling - full resolution.
+    """
+
+    max_points: Optional[int] = None
+    """Target point count: the read is bucketed into ~max_points buckets."""
+    bin_size: Optional[str] = None
+    """Explicit bucket width as a Postgres interval string (e.g. '5 seconds');
+    overrides max_points when set."""
+    method: Optional[str] = None
+    """Strategy: 'sample', 'average' or 'minmax'. None disables downsampling.
+
+    Note: 'average'/'minmax' aggregate the bare stored numbers per leaf and are
+    only correct for unit-normalized (base-unit) data."""
+    edge_anchors: Optional[bool] = None
+    """Include the window's first/last real datapoints as endpoints
+    (server default: True)."""
+
+    def is_active(self) -> bool:
+        """True if any downsampling is requested."""
+        return (
+            self.max_points is not None
+            or self.bin_size is not None
+            or bool(self.method)
+        )
+
+
 class DataToolMixin(BaseController):
     """Generic controller mixin for DataTool models.
 
@@ -365,14 +396,44 @@ class DataToolMixin(BaseController):
         timestamp: Optional[dt.datetime] = None
         """Timestamp for the data point. Defaults to now(UTC)."""
 
+    class StoreChannelSeriesParams(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        channel: Any = None
+        """DataChannel instance or channel name (str)."""
+        timestamps: List[dt.datetime] = []
+        """Timestamps, parallel to ``values``."""
+        values: List[Any] = []
+        """Raw dicts/scalars or Characteristic instances, parallel to
+        ``timestamps``."""
+
+    class StoreChannelDataBulkParams(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        series: List["DataToolMixin.StoreChannelSeriesParams"] = []
+        """One entry per channel, each with parallel timestamps/values."""
+        chunk_size: int = 5000
+        """Rows per write_tool_channel_raw batch."""
+        ensure_tool: bool = True
+        """Create the tool table first if it does not exist."""
+        schema_reload_wait: Optional[float] = None
+        """Seconds to wait after creating the tool (PostgREST reloads its
+        schema cache after the DDL). None auto-selects 1.5 for PostgREST and
+        0 for local SQLite."""
+
     class LoadChannelDataParams(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
         channel: Union[str, List[str], Any, None] = None
         """Channel name (str), list of names, DataChannel instance,
         list of DataChannel instances, or None (all channels)."""
         start: Optional[dt.datetime] = None
+        """Start of the time range (inclusive). None reads from the earliest
+        stored point."""
         end: Optional[dt.datetime] = None
+        """End of the time range (inclusive). None reads up to the latest
+        stored point."""
         limit: Optional[int] = None
+        """Maximum number of rows to return. None means no limit."""
+        downsample: Optional[DownsampleParams] = None
+        """Optional server-side downsampling request. None = full resolution."""
         typed: bool = True
         """If True, deserialize values using channel characteristic or
         target_schema. If False, return raw dicts (faster)."""
@@ -616,6 +677,84 @@ class DataToolMixin(BaseController):
             )
         )
 
+    async def _ensure_tool_exists(self, tool_osw_id: str) -> bool:
+        """Create the tool table if it does not exist. Returns True if created.
+
+        For PostgREST the CREATE triggers a schema-cache reload, so callers
+        should wait briefly before the first write (see store_channel_data_bulk).
+        """
+        try:
+            existing = await self.archive_database.get_tools_list()
+        except Exception:
+            existing = []
+        if tool_osw_id in existing:
+            return False
+        await self.archive_database.create_tool(
+            TSDCMixin.CreateToolParams(tool_osw_id=tool_osw_id)
+        )
+        return True
+
+    async def store_channel_data_bulk(
+        self, params: "DataToolMixin.StoreChannelDataBulkParams"
+    ) -> int:
+        """Store many channel values at once (efficient for large series).
+
+        Each entry in ``params.series`` carries a channel (name or instance)
+        with parallel ``timestamps``/``values`` arrays. Values are converted
+        exactly like store_channel_data (Characteristic -> base unit; dict or
+        scalar otherwise) and written in ``chunk_size`` batches via
+        write_tool_channel_raw. When ``ensure_tool`` the tool table is created
+        first if missing (with a schema-reload wait for PostgREST). Returns the
+        number of points written.
+        """
+        if self.archive_database is None:
+            raise ValueError("No archive database configured")
+        tool_osw_id = self.get_osw_id()
+
+        if params.ensure_tool and await self._ensure_tool_exists(tool_osw_id):
+            driver = getattr(self.archive_database, "_driver", None)
+            is_pgrst = getattr(driver, "client", None) is not None
+            wait = (
+                params.schema_reload_wait
+                if params.schema_reload_wait is not None
+                else (1.5 if is_pgrst else 0.0)
+            )
+            if wait > 0:
+                await asyncio.sleep(wait)
+
+        written = 0
+        batch: List[dict] = []
+
+        async def _flush():
+            nonlocal written, batch
+            if not batch:
+                return
+            await self.archive_database.write_tool_channel_raw(
+                TSDCMixin.WriteToolChannelRawParams(tool_osw_id=tool_osw_id, data=batch)
+            )
+            written += len(batch)
+            batch = []
+
+        for series in params.series:
+            channel = self._resolve_channel(series.channel)
+            ch_osw_id = channel.get_osw_id()
+            if "#" in ch_osw_id:
+                ch_osw_id = ch_osw_id.split("#")[-1]
+            n = min(len(series.timestamps), len(series.values))
+            for i in range(n):
+                data = self._value_to_store_data(series.values[i], channel)
+                batch.append(
+                    {
+                        "ts": series.timestamps[i].isoformat(),
+                        "ch": ch_osw_id,
+                        "data": data,
+                    }
+                )
+                if len(batch) >= params.chunk_size:
+                    await _flush()
+        await _flush()
+        return written
+
     async def load_channel_data(
         self,
         params: "DataToolMixin.LoadChannelDataParams",
@@ -670,6 +809,7 @@ class DataToolMixin(BaseController):
                 start=params.start,
                 end=params.end,
                 limit=params.limit,
+                downsample=params.downsample,
             )
         )
 
@@ -888,11 +1028,50 @@ class TSDCMixin(BaseController):
         """Filters for reading data"""
         limit: Optional[int] = None
         """Limit the number of returned rows"""
+        downsample: Optional[DownsampleParams] = None
+        """Optional server-side downsampling request. None = full resolution."""
 
-    @abstractmethod
     async def read_tool_channel_raw(self, params: "TSDCMixin.ReadToolChannelRawParams"):
-        """Retrieves data for a tool within a time range."""
-        pass
+        """Retrieve data for a tool within a time range.
+
+        Shared by every driver-backed controller (v1 and v2, Local and
+        PostgREST): it builds the filter list and forwards all parameters -
+        including the optional server-side downsampling parameters
+        (``max_points`` / ``bin_size`` / ``downsample_method`` /
+        ``edge_anchors``) - to the backend driver via ``self._driver.read``.
+        """
+        driver = getattr(self, "_driver", None)
+        if driver is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} has no _driver to read from"
+            )
+        filters = None
+        if params.filter:
+            filters = [
+                {
+                    "column": (
+                        f.column.value
+                        if isinstance(f.column, TSDCMixin.FilterColumn)
+                        else f.column
+                    ),
+                    "operator": f.operator.value,
+                    "criteria": f.criteria,
+                }
+                for f in params.filter
+            ]
+        ds = params.downsample
+        return await driver.read(
+            tool_osw_id=params.tool_osw_id,
+            channel_osw_id=params.channel_osw_id,
+            start=params.start,
+            end=params.end,
+            filters=filters,
+            limit=params.limit,
+            max_points=ds.max_points if ds else None,
+            bin_size=ds.bin_size if ds else None,
+            downsample_method=ds.method if ds else None,
+            edge_anchors=ds.edge_anchors if ds else None,
+        )
 
     def read_tool_channel_raw_sync(self, params: "TSDCMixin.ReadToolChannelRawParams"):
         return asyncio.run(self.read_tool_channel_raw(params=params))

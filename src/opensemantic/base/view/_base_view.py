@@ -82,9 +82,10 @@ class BaseDataView:
     # -- Plot / log / config cards --
 
     def _build_plot(self):
-        self._plot_col = pn.Column(
-            sizing_mode="stretch_width", scroll=True, max_height=600
-        )
+        # No height cap / inner scroll here: the plots stack at their natural
+        # height and the main content area (.content) scrolls as one. A fixed
+        # max_height + scroll=True would add a second, nested scrollbar.
+        self._plot_col = pn.Column(sizing_mode="stretch_width")
         self._plot_card = pn.Card(
             self._plot_col,
             title=_t("time_series", self.lang),

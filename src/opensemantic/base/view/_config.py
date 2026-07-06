@@ -3,9 +3,7 @@
 from enum import Enum
 from typing import List
 
-from pydantic import ConfigDict, Field
-
-from opensemantic import OswBaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LangCode(str, Enum):
@@ -19,7 +17,69 @@ class GroupingMode(str, Enum):
     SUB = "group-subcharacteristics"
 
 
-class TreeConfig(OswBaseModel):
+class DownsampleMethod(str, Enum):
+    AUTO = "auto"
+    SAMPLE = "sample"
+    AVERAGE = "average"
+    MINMAX = "minmax"
+
+
+class DownsampleConfig(BaseModel):
+    """Server-side downsampling configuration.
+
+    When enabled and the backend supports it (PostgREST/TimescaleDB), the
+    plot requests about ``max_points`` points per channel instead of the
+    full series. ``average`` and ``minmax`` aggregate the bare stored
+    numbers and are only correct for unit-normalized data; ``auto`` picks
+    ``minmax`` for numeric channels and ``sample`` for text channels.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "DownsampleConfig",
+            "defaultProperties": [
+                "enabled",
+                "max_points",
+                "method",
+                "edge_anchors",
+            ],
+        }
+    )
+
+    enabled: bool = Field(
+        True,
+        title="Downsample enabled",
+        json_schema_extra={"title*": {"de": "Downsampling aktiviert"}},
+    )
+    max_points: int = Field(
+        2000,
+        title="Max points",
+        description="Target number of points per channel",
+        ge=2,
+        json_schema_extra={
+            "title*": {"de": "Maximale Punkte"},
+            "description*": {"de": "Zielanzahl Punkte pro Kanal"},
+        },
+    )
+    method: DownsampleMethod = Field(
+        DownsampleMethod.AUTO,
+        title="Method",
+        json_schema_extra={"title*": {"de": "Methode"}},
+    )
+    edge_anchors: bool = Field(
+        True,
+        title="Edge anchors",
+        description="Keep the window's first/last real datapoints as endpoints",
+        json_schema_extra={
+            "title*": {"de": "Randpunkte"},
+            "description*": {
+                "de": "Ersten/letzten realen Datenpunkt des Fensters behalten"
+            },
+        },
+    )
+
+
+class TreeConfig(BaseModel):
     """Wunderbaum TreeGrid configuration."""
 
     model_config = ConfigDict(
@@ -27,7 +87,7 @@ class TreeConfig(OswBaseModel):
     )
 
 
-class PlotConfig(OswBaseModel):
+class PlotConfig(BaseModel):
     """Time series plot configuration."""
 
     model_config = ConfigDict(
@@ -38,6 +98,7 @@ class PlotConfig(OswBaseModel):
                 "auto_fetch",
                 "row_limit",
                 "cache_enabled",
+                "downsample",
             ],
         }
     )
@@ -72,9 +133,14 @@ class PlotConfig(OswBaseModel):
         title="Cache enabled",
         json_schema_extra={"title*": {"de": "Cache aktiviert"}},
     )
+    downsample: DownsampleConfig = Field(
+        default_factory=DownsampleConfig,
+        title="Downsample",
+        json_schema_extra={"title*": {"de": "Downsampling"}},
+    )
 
 
-class LiveConfig(OswBaseModel):
+class LiveConfig(BaseModel):
     """Live subscription configuration."""
 
     model_config = ConfigDict(
@@ -108,7 +174,7 @@ class LiveConfig(OswBaseModel):
     )
 
 
-class DashboardConfig(OswBaseModel):
+class DashboardConfig(BaseModel):
     """Root dashboard configuration."""
 
     model_config = ConfigDict(

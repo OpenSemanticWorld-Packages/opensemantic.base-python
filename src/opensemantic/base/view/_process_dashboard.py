@@ -32,6 +32,7 @@ from opensemantic.base.view._channel_utils import (
     _t,
     get_display_label,
     group_channels_by_characteristic,
+    resolve_downsample_method,
     resolve_value_type,
 )
 from opensemantic.base.view._config import DashboardConfig
@@ -297,6 +298,10 @@ class ProcessObjectView(BaseDataView):
 
     async def _load_and_plot(self):
         limit = self._config.plot.row_limit
+        ds = self._config.plot.downsample
+        max_points = ds.max_points if ds.enabled else None
+        edge_anchors = ds.edge_anchors if ds.enabled else None
+        method_cfg = ds.method.value if ds.enabled else None
         self._traces = []
 
         for obj_entry in self._selected_objects:
@@ -306,8 +311,22 @@ class ProcessObjectView(BaseDataView):
                     end = _as_utc(getattr(proc, "end_date_time", None))
                     if start is None:
                         continue
+                    method = (
+                        resolve_downsample_method(ch, method_cfg)
+                        if method_cfg
+                        else None
+                    )
                     try:
-                        points = await self._cache.get_data(ctrl, ch, start, end, limit)
+                        points = await self._cache.get_data(
+                            ctrl,
+                            ch,
+                            start,
+                            end,
+                            limit,
+                            max_points=max_points,
+                            method=method,
+                            edge_anchors=edge_anchors,
+                        )
                     except Exception as e:
                         _logger.error(
                             "Error loading %s/%s: %s",

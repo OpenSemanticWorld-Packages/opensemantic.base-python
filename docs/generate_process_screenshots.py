@@ -8,14 +8,15 @@ Usage:
     python docs/generate_process_screenshots.py
 """
 
-import glob
-import io
 import os
-import subprocess
-import sys
-import time
 
 import imageio.v3 as iio
+from _screenshot_utils import (
+    capture,
+    click_tree_checkbox,
+    start_server,
+    stop_server,
+)
 from playwright.sync_api import sync_playwright
 
 DOCS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,41 +25,6 @@ EXAMPLE = os.path.join(PACKAGE_DIR, "examples", "process_dashboard.py")
 PORT = 5012
 URL = f"http://localhost:{PORT}/process_dashboard"
 VIEWPORT = {"width": 1400, "height": 900}
-
-
-def all_wb_shadows_js():
-    """JS that returns all Wunderbaum shadow roots in DOM order."""
-    return """
-    function allWbShadows(root) {
-        const out = [];
-        function rec(r) {
-            for (const el of r.querySelectorAll('*')) {
-                if (el.shadowRoot) {
-                    if (el.shadowRoot.querySelectorAll('.wb-row').length > 0)
-                        out.push(el.shadowRoot);
-                    rec(el.shadowRoot);
-                }
-            }
-        }
-        rec(root);
-        return out;
-    }
-    """
-
-
-def click_tree_checkbox(page, tree_idx, cb_idx):
-    """Click the cb_idx-th checkbox of the tree_idx-th Wunderbaum (0=objects)."""
-    page.evaluate(
-        f"""() => {{
-        {all_wb_shadows_js()}
-        const shadows = allWbShadows(document);
-        const sh = shadows[{tree_idx}];
-        if (sh) {{
-            const cbs = sh.querySelectorAll('i.wb-checkbox');
-            if (cbs[{cb_idx}]) cbs[{cb_idx}].click();
-        }}
-    }}"""
-    )
 
 
 def switch_temperature_unit(page):
@@ -94,40 +60,9 @@ def switch_temperature_unit(page):
     )
 
 
-def capture(page, frames, delay=500):
-    page.wait_for_timeout(delay)
-    buf = page.screenshot()
-    frames.append(iio.imread(io.BytesIO(buf)))
-
-
-def start_server():
-    """Start the Panel server, cleaning old archive DBs for fresh data."""
-    for db in glob.glob(os.path.join(PACKAGE_DIR, "*_db.sqlite")):
-        os.remove(db)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "panel", "serve", EXAMPLE, "--port", str(PORT)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=PACKAGE_DIR,
-    )
-    # Let the import + first module execution settle. panel serve re-runs the
-    # script per session (storing the demo data each time), so the first page
-    # load is slow - handled by a long goto timeout below.
-    time.sleep(10)
-    return proc
-
-
-def stop_server(proc):
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-
-
 def main():
     print("Starting Panel server...")
-    proc = start_server()
+    proc = start_server(EXAMPLE, PORT, clean_sqlite=True, settle=10)
     try:
         frames = []
         with sync_playwright() as p:
