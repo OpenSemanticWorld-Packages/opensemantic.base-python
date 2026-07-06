@@ -37,6 +37,10 @@ class ChannelDataCache:
         end: Optional[dt.datetime] = None,
         limit: int = 10000,
         typed: bool = True,
+        max_points: Optional[int] = None,
+        bin_size: Optional[str] = None,
+        method: Optional[str] = None,
+        edge_anchors: Optional[bool] = None,
     ) -> List[Any]:
         """Return ChannelDataPoint list for [start, end].
 
@@ -56,6 +60,11 @@ class ChannelDataCache:
             Maximum rows per backend request.
         typed
             If True, values are typed Characteristic instances.
+        max_points, bin_size, method, edge_anchors
+            Server-side downsampling parameters. When any of max_points /
+            bin_size / method is set the gap-merge cache is bypassed (a
+            downsampled read is resolution-dependent and must not poison the
+            full-resolution cache) and the backend is queried directly.
 
         Returns
         -------
@@ -66,8 +75,21 @@ class ChannelDataCache:
 
         ch_uuid = channel.uuid
 
-        if not self.enabled:
-            return await self._fetch(controller, channel, start, end, limit, typed)
+        downsampling = max_points is not None or bin_size is not None or bool(method)
+
+        if not self.enabled or downsampling:
+            return await self._fetch(
+                controller,
+                channel,
+                start,
+                end,
+                limit,
+                typed,
+                max_points,
+                bin_size,
+                method,
+                edge_anchors,
+            )
 
         covered = self._intervals.get(ch_uuid, [])
         gaps = _compute_gaps(start, end, covered)
@@ -92,10 +114,25 @@ class ChannelDataCache:
         end: dt.datetime,
         limit: int,
         typed: bool,
+        max_points: Optional[int] = None,
+        bin_size: Optional[str] = None,
+        method: Optional[str] = None,
+        edge_anchors: Optional[bool] = None,
     ) -> List[Any]:
         """Fetch data via controller.load_channel_data()."""
-        from opensemantic.base._controller_mixin import DataToolMixin
+        from opensemantic.base._controller_mixin import (
+            DataToolMixin,
+            DownsampleParams,
+        )
 
+        downsample = None
+        if max_points is not None or bin_size is not None or method:
+            downsample = DownsampleParams(
+                max_points=max_points,
+                bin_size=bin_size,
+                method=method,
+                edge_anchors=edge_anchors,
+            )
         points = await controller.load_channel_data(
             DataToolMixin.LoadChannelDataParams(
                 channel=channel,
@@ -103,6 +140,7 @@ class ChannelDataCache:
                 end=end,
                 limit=limit,
                 typed=typed,
+                downsample=downsample,
             )
         )
         # Normalize timestamps to UTC-aware and sort

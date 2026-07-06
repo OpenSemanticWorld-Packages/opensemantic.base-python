@@ -18,7 +18,14 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import panel as pn
-from bokeh.models import ColumnDataSource, DatetimeTickFormatter
+from bokeh.events import Reset
+from bokeh.models import (
+    BoxZoomTool,
+    ColumnDataSource,
+    CustomJS,
+    DataRange1d,
+    DatetimeTickFormatter,
+)
 from bokeh.plotting import figure as bk_figure
 from panelini import Panelini
 from panelini.panels.wunderbaum import Wunderbaum
@@ -31,6 +38,7 @@ from opensemantic.base.view._channel_utils import (
     get_display_label,
     get_selected_channels,
     group_channels_by_characteristic,
+    resolve_downsample_method,
     resolve_value_type,
 )
 from opensemantic.base.view._config import DashboardConfig
@@ -46,6 +54,14 @@ def get_unit_enum_from_value(value: Any) -> Any:
 
 
 _logger = logging.getLogger(__name__)
+
+# Wunderbaum's grid sizes its container to a fixed 800px (inline width), which
+# overflows the sidebar and shows a horizontal scrollbar. Force it to fill the
+# available width instead. !important beats the inline style (which has none).
+_TREE_GRID_CSS = (
+    ".tree-container.wunderbaum { width: 100% !important; }\n"
+    ".wunderbaum-wrapper { overflow-x: hidden !important; }"
+)
 
 
 class DataToolView(BaseDataView):
@@ -92,6 +108,19 @@ class DataToolView(BaseDataView):
         self._cached_data: Dict[str, List] = {}
         self._composite_parents: Dict[str, Tuple[Any, str]] = {}
 
+        # Zoom-driven downsampling state. _zoom_window overrides the picker
+        # window when "Load current range" re-fetches the box-zoomed range;
+        # _shared_x_range is the linked x-range the button reads.
+        self._zoom_window: Optional[Tuple[dt.datetime, dt.datetime]] = None
+        self._shared_x_range = None
+        # Reset bridge. figure.on_event(Reset) does not propagate through
+        # Panel's Bokeh pane, but model property changes sync reliably. A
+        # CustomJS on the Reset event bumps this source's data; its
+        # server-side on_change (_on_reset_bridge) reloads the full window
+        # after a "Load current range" zoom-reload.
+        self._reset_bridge = ColumnDataSource(data={"n": [0]})
+        self._reset_bridge.on_change("data", self._on_reset_bridge)
+
         # Cache
         self._cache = ChannelDataCache(enabled=self._config.plot.cache_enabled)
 
@@ -116,14 +145,15 @@ class DataToolView(BaseDataView):
         self._tree = Wunderbaum(
             source=source,
             columns=[
-                {"id": "*", "title": _t("channel", self.lang), "width": "200px"},
+                {"id": "*", "title": _t("channel", self.lang), "width": "190px"},
                 {
                     "id": "characteristic",
                     "title": _t("characteristic", self.lang),
-                    "width": "150px",
+                    "width": "130px",
                 },
             ],
             options={"checkbox": True, "selectMode": "hier"},
+            stylesheets=[_TREE_GRID_CSS],
         )
         # Watch the source param for checkbox changes (emitSource syncs selected state)
         self._tree.param.watch(self._on_source_change, ["source"])
@@ -136,6 +166,8 @@ class DataToolView(BaseDataView):
     def _on_source_change(self, *args):
         """Handle tree source changes (checkbox toggling)."""
         try:
+            # A selection change loads the full picker window, not a zoom slice.
+            self._zoom_window = None
             self._update_selection()
             self._update_unit_controls()
             if self._config.plot.auto_fetch:
@@ -178,6 +210,14 @@ class DataToolView(BaseDataView):
         )
         self._load_button.on_click(self._on_load_click)
 
+        # Re-fetch the currently visible (box-zoomed) x-range at finer
+        # resolution, keeping the zoom. Box-zoom itself is purely visual.
+        self._load_range_button = pn.widgets.Button(
+            name=_t("load_range", self.lang),
+            button_type="default",
+        )
+        self._load_range_button.on_click(self._on_load_range)
+
         self._auto_fetch_cb = pn.widgets.Checkbox(
             name=_t("auto_fetch", self.lang),
             value=self._config.plot.auto_fetch,
@@ -207,6 +247,7 @@ class DataToolView(BaseDataView):
             self._start_picker,
             self._end_picker,
             self._load_button,
+            self._load_range_button,
             self._auto_fetch_cb,
             self._row_limit_input,
             self._clear_cache_button,
@@ -218,6 +259,8 @@ class DataToolView(BaseDataView):
         self._trigger_load()
 
     def _on_time_change(self, event):
+        # A manual time-range edit overrides any active zoom slice.
+        self._zoom_window = None
         if self._config.plot.auto_fetch and self._selected:
             self._trigger_load()
 
@@ -296,9 +339,14 @@ class DataToolView(BaseDataView):
 
     async def _load_and_plot(self):
         """Load data for all selected channels and update plots."""
-        start = self._start_picker.value
-        # Use current time as end when auto-fetching so new data is included
-        end = dt.datetime.now() if self._auto_fetch_cb.value else self._end_picker.value
+        if self._zoom_window is not None:
+            start, end = self._zoom_window
+        else:
+            # Respect the pickers. auto_fetch only controls whether a change
+            # (selection/time) auto-triggers a load, not the window itself;
+            # live "follow now" is the LiveDataToolView's job, not this view's.
+            start = self._start_picker.value
+            end = self._end_picker.value
         if start is None or end is None:
             return
 
@@ -320,17 +368,49 @@ class DataToolView(BaseDataView):
                     if parent_ch.uuid in loaded_parents:
                         continue
                     loaded_parents.add(parent_ch.uuid)
+                    mp, method, edge = self._downsample_for(parent_ch)
                     rows = await self._cache.get_data(
-                        ctrl, parent_ch, start, end, limit
+                        ctrl,
+                        parent_ch,
+                        start,
+                        end,
+                        limit,
+                        max_points=mp,
+                        method=method,
+                        edge_anchors=edge,
                     )
                     self._cached_data[parent_ch.uuid] = rows
                 else:
-                    rows = await self._cache.get_data(ctrl, ch, start, end, limit)
+                    mp, method, edge = self._downsample_for(ch)
+                    rows = await self._cache.get_data(
+                        ctrl,
+                        ch,
+                        start,
+                        end,
+                        limit,
+                        max_points=mp,
+                        method=method,
+                        edge_anchors=edge,
+                    )
                     self._cached_data[ch.uuid] = rows
             except Exception as e:
                 _logger.error("Error loading %s/%s: %s", ctrl.name, ch.name, e)
 
         self._refresh_plot()
+
+    def _downsample_for(self, channel):
+        """Return ``(max_points, method, edge_anchors)`` for a channel.
+
+        Default applies the dashboard config, auto-resolving the method per
+        channel type. Override to vary the strategy per channel (e.g. force
+        a different method, or raw/no downsampling, for specific channels).
+        Return ``(None, None, None)`` to read the channel at full resolution.
+        """
+        ds = self._config.plot.downsample
+        if not ds.enabled:
+            return None, None, None
+        method = resolve_downsample_method(channel, ds.method.value)
+        return ds.max_points, method, ds.edge_anchors
 
     def _build_figure(self):
         """Build Bokeh figures - one per characteristic group."""
@@ -349,6 +429,14 @@ class DataToolView(BaseDataView):
         if not plot_groups:
             return
 
+        # One shared x-range for every figure, so panning, zooming or resetting
+        # any plot moves all of them together (the y-ranges stay independent).
+        # Sharing it at figure creation - rather than reassigning f.x_range
+        # after the panes render - is what guarantees the link: a deferred
+        # reassignment races the render and leaves some plots unlinked.
+        shared_x = DataRange1d()
+
+        figs = []
         color_idx = 0
         for group_key, channels, vtype in plot_groups:
             axis_label = self._get_axis_label(group_key)
@@ -356,8 +444,17 @@ class DataToolView(BaseDataView):
                 height=250,
                 sizing_mode="stretch_width",
                 x_axis_type="datetime",
+                x_range=shared_x,
                 y_axis_label=axis_label,
+                tools="pan,wheel_zoom,reset,save",
             )
+            # x-only box zoom as the active drag tool: dragging zooms the time
+            # axis only (y stays auto so a downsampled spike isn't clipped).
+            # The zoom is purely visual; use the "Load current range" button to
+            # re-fetch that window at a finer resolution.
+            box_zoom = BoxZoomTool(dimensions="width")
+            fig.add_tools(box_zoom)
+            fig.toolbar.active_drag = box_zoom
             fig.xaxis.formatter = DatetimeTickFormatter(
                 seconds="%H:%M:%S",
                 minutes="%H:%M",
@@ -383,7 +480,74 @@ class DataToolView(BaseDataView):
                     color_idx += 1
 
             fig.legend.click_policy = "hide"
+            figs.append(fig)
+
+        # Keep the shared range for "Load current range" and bridge the Reset
+        # event: figure.on_event(Reset) does not propagate through Panel's Bokeh
+        # pane, so a CustomJS on the Reset event bumps _reset_bridge, whose
+        # server-side on_change reloads. Done while the figures are still
+        # detached - mutating models already in the live document from this
+        # async load task raises a document-lock error.
+        self._shared_x_range = shared_x
+        reset_cb = CustomJS(
+            args={"bridge": self._reset_bridge},
+            code="bridge.data = {n: [(bridge.data.n[0] || 0) + 1]};",
+        )
+        for fig in figs:
+            fig.js_on_event(Reset, reset_cb)
+
+        for fig in figs:
             self._plot_col.append(pn.pane.Bokeh(fig, sizing_mode="stretch_width"))
+
+    def _current_xrange_window(self):
+        """Return (start, end) *naive* datetimes of the current plot x-range.
+
+        The shared x-range start/end (epoch ms) reflect the user's latest
+        pan/zoom, synced from the browser. The data is plotted in local wall
+        time (see _extract_trace_data), so these epochs are the local
+        wall-clock values - returned as naive datetimes so _load_and_plot
+        converts them naive->UTC exactly like the date pickers do (treating
+        them as local). Returning UTC-aware here would shift the loaded window
+        by the local/UTC offset. Returns None if no zoom range is set.
+        """
+        xr = self._shared_x_range
+        if xr is None or xr.start is None or xr.end is None:
+            return None
+        try:
+            start = dt.datetime.fromtimestamp(
+                xr.start / 1000.0, dt.timezone.utc
+            ).replace(tzinfo=None)
+            end = dt.datetime.fromtimestamp(xr.end / 1000.0, dt.timezone.utc).replace(
+                tzinfo=None
+            )
+        except Exception:
+            return None
+        return (start, end) if end > start else None
+
+    def _on_load_range(self, event):
+        """Re-fetch the currently visible (zoomed) x-range at finer resolution."""
+        window = self._current_xrange_window()
+        if window is None:
+            return
+        self._zoom_window = window
+        self._trigger_load()
+
+    def _on_reset_bridge(self, attr, old, new):
+        """Toolbar reset (bridged via CustomJS -> source data change).
+
+        figure.on_event(Reset) does not reach the server through Panel's Bokeh
+        pane, so the Reset event is bridged through this source's data change
+        (see _build_figure). After "Load current range" the figures hold only
+        the
+        zoomed window, so Bokeh's own reset would only return to that window;
+        clear the zoom and reload the full (picker) window. For a plain visual
+        box-zoom (nothing was reloaded) there is no zoom window, and Bokeh's
+        reset already restores the full view, so we do nothing.
+        """
+        if self._zoom_window is None:
+            return
+        self._zoom_window = None
+        self._trigger_load()
 
     def _extract_trace_data(self, ch: Any, group_key: str) -> Tuple[List, List]:
         """Extract timestamps and values from cached ChannelDataPoints.
@@ -556,11 +720,11 @@ class DataToolView(BaseDataView):
     def set_time_range(self, start, end, fetch: bool = True):
         """Set an explicit time range and (optionally) reload the data.
 
-        Accepts tz-aware or naive datetimes (naive is treated as UTC). Disables
-        auto-fetch, which otherwise pins the end to ``now``, so an arbitrary
-        historical window can be shown.
+        Accepts tz-aware or naive datetimes (naive is treated as UTC). The
+        window is honored as-is: auto-fetch no longer pins the end to ``now``
+        (it only controls whether changes auto-trigger a load), so an arbitrary
+        historical window can be shown without disabling auto-fetch.
         """
-        self._auto_fetch_cb.value = False
         self._start_picker.value = self._to_picker_value(start)
         self._end_picker.value = self._to_picker_value(end)
         if fetch:

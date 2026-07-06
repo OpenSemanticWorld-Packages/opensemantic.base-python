@@ -154,6 +154,88 @@ See [examples/datatool_dashboard.py](examples/datatool_dashboard.py) for a full 
 
 To regenerate the screenshots after UI changes, see [docs/generate_screenshots.py](docs/generate_screenshots.py).
 
+## Server-side downsampling
+
+Large time series are downsampled on the server so the plot only transports the
+points the current zoom level can show. This is driven by `PlotConfig.downsample`:
+
+```python
+from opensemantic.base.view._config import DashboardConfig, PlotConfig, DownsampleConfig
+
+config = DashboardConfig(
+    plot=PlotConfig(
+        downsample=DownsampleConfig(
+            enabled=True,      # downsample when the backend supports it
+            max_points=2000,   # target points per channel
+            method="auto",     # auto | sample | average | minmax
+            edge_anchors=True, # keep the window's first/last real datapoints
+        )
+    )
+)
+```
+
+It only engages on a PostgREST/TimescaleDB backend (the `downsample_tool_channel`
+RPC). On a SQLite/local backend, the RPC being absent, or any error, the read
+silently falls back to the full-resolution path - downsampling never breaks a
+read. The `DataToolView` plot also reloads at a finer resolution when you zoom in.
+
+Strategies (N = number of buckets):
+
+- `sample` (default): one real datapoint nearest each bucket center. Schema
+  agnostic; works for scalar and composite channels. N rows.
+- `average`: structure-preserving deep average per bucket (every numeric leaf
+  averaged, non-numeric keys carried), bucket-center timestamp. N rows.
+- `minmax`: the real min and max datapoint of every numeric sub-characteristic
+  per bucket. Scalar: 2N real rows; composite: the real per-leaf extremes. Best
+  at preserving spikes.
+- `auto`: `minmax` for numeric channels, `sample` for text channels.
+
+`average`/`minmax` skip non-numeric leaves (comments, labels) and fall back to
+`sample` when a channel has no numeric leaf at all.
+
+**Unit normalization caveat:** `average` and `minmax` compare and combine the
+bare stored numbers per leaf, so they are only correct when all stored values of
+a leaf share the same unit. The archive stores base-unit-normalized values, but
+data ingested without normalization (mixed units in one channel) will produce
+wrong `average`/`minmax` results. `sample` returns whole real rows and is
+unaffected.
+
+The RPC lives in pgstack's `postgres/config/optional/100_init_tsdb_schema.sql`
+(uses only core, Apache-2 TimescaleDB; no toolkit dependency). It is created at
+database init; apply it manually (`psql -f` / pgAdmin) on an already-running
+cluster. To measure the speedup, see
+[benchmarks/bench_downsample.py](benchmarks/bench_downsample.py).
+
+[examples/downsample_demo.py](examples/downsample_demo.py) is an interactive
+demo: four channels carry the same 100k-point signal (with narrow spikes), one
+per strategy - the channels are named `raw`, `sample`, `average`, `minmax`.
+Selecting `raw` loads slowly with full detail; `sample`/`average` load fast but
+drop the spikes; `minmax` keeps them. Box-zoom into a flat stretch and click
+"Load current range" to re-fetch that window at finer resolution - the hidden
+spikes reappear on `sample`/`average`. Needs a running pgstack with the RPC
+applied; seed once with `python examples/downsample_demo.py`, then
+`panel serve examples/downsample_demo.py`.
+
+![Downsampling demo](docs/downsample_demo.gif)
+
+![Strategy comparison](docs/screenshot_downsample_raw.png)
+
+*Full window, all four channels: `raw` and `minmax` keep the spikes; `sample`
+and `average` smooth them away at the coarse full-window resolution.*
+
+![Zoomed, before reload](docs/screenshot_downsample_zoom_select.png)
+
+*Box-zoomed around a spike on the `sample` channel: only the coarse full-window
+points are shown, so the spike is still hidden.*
+
+![Zoom reveals the peak](docs/screenshot_downsample_zoom.png)
+
+*After "Load current range": the window is re-fetched at finer buckets and the
+hidden spike reappears. The toolbar reset returns to the full window.*
+
+To regenerate these, see
+[docs/generate_downsample_screenshots.py](docs/generate_downsample_screenshots.py).
+
 ## ProcessObjectView (Process/Object Dashboard UI)
 
 Where `DataToolView` is centered on data tools, `ProcessObjectView` is centered

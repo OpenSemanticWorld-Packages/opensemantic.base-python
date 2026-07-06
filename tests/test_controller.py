@@ -991,6 +991,45 @@ def test_store_channel_data_by_name():
     _cleanup_archive(ctrl)
 
 
+def test_store_channel_data_bulk():
+    """Bulk-store many points across two channels; load returns them all."""
+    import datetime
+
+    ctrl = _make_controller_with_channels()
+
+    async def _test():
+        base = datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc)
+        n = 2500  # 2 channels * 2500 = 5000 rows, chunked below
+        ts = [base + datetime.timedelta(seconds=i) for i in range(n)]
+        written = await ctrl.store_channel_data_bulk(
+            ctrl.StoreChannelDataBulkParams(
+                series=[
+                    ctrl.StoreChannelSeriesParams(
+                        channel="pressure",
+                        timestamps=ts,
+                        values=[{"value": float(i)} for i in range(n)],
+                    ),
+                    ctrl.StoreChannelSeriesParams(
+                        channel="temperature",
+                        timestamps=ts,
+                        values=[{"value": float(i)} for i in range(n)],
+                    ),
+                ],
+                chunk_size=1000,
+            )
+        )
+        assert written == 2 * n
+        # pressure has no characteristic -> raw dicts back
+        rows = await ctrl.load_channel_data(
+            ctrl.LoadChannelDataParams(channel="pressure")
+        )
+        assert len(rows) == n
+        assert sorted(r.value["value"] for r in rows) == [float(i) for i in range(n)]
+
+    asyncio.run(_test())
+    _cleanup_archive(ctrl)
+
+
 def test_store_channel_data_typed():
     """Store Temperature instance, verify base unit conversion."""
     import datetime

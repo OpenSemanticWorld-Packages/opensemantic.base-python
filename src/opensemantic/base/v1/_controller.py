@@ -9,8 +9,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from pydantic import ConfigDict, PrivateAttr
 
-from opensemantic.base._controller_mixin import (
+from opensemantic.base._controller_mixin import (  # noqa: F401 (re-export)
     DataToolMixin,
+    DownsampleParams,
     TSDCMixin,
 )
 from opensemantic.base.v1._model import Database as _Database
@@ -74,32 +75,6 @@ try:
         ):
             return await self._driver.write(params.tool_osw_id, params.data)
 
-        async def read_tool_channel_raw(
-            self, params: TSDCMixin.ReadToolChannelRawParams
-        ):
-            filters = None
-            if params.filter:
-                filters = [
-                    {
-                        "column": (
-                            f.column.value
-                            if isinstance(f.column, TSDCMixin.FilterColumn)
-                            else f.column
-                        ),
-                        "operator": f.operator.value,
-                        "criteria": f.criteria,
-                    }
-                    for f in params.filter
-                ]
-            return await self._driver.read(
-                tool_osw_id=params.tool_osw_id,
-                channel_osw_id=params.channel_osw_id,
-                start=params.start,
-                end=params.end,
-                filters=filters,
-                limit=params.limit,
-            )
-
         async def delete_by_ids(self, tool_osw_id: str, ids: List[int]):
             return await self._driver.delete_by_ids(tool_osw_id, ids)
 
@@ -155,32 +130,6 @@ try:
         ):
             return await self._driver.write(params.tool_osw_id, params.data)
 
-        async def read_tool_channel_raw(
-            self, params: TSDCMixin.ReadToolChannelRawParams
-        ):
-            filters = None
-            if params.filter:
-                filters = [
-                    {
-                        "column": (
-                            f.column.value
-                            if isinstance(f.column, TSDCMixin.FilterColumn)
-                            else f.column
-                        ),
-                        "operator": f.operator.value,
-                        "criteria": f.criteria,
-                    }
-                    for f in params.filter
-                ]
-            return await self._driver.read(
-                tool_osw_id=params.tool_osw_id,
-                channel_osw_id=params.channel_osw_id,
-                start=params.start,
-                end=params.end,
-                filters=filters,
-                limit=params.limit,
-            )
-
         async def get_tool_config(self):
             return await self._driver.get_tool_config()
 
@@ -192,3 +141,18 @@ try:
 
 except ImportError:
     pass
+
+
+# Re-export the param/result data classes so callers construct them from the
+# user-facing module (``from opensemantic.base.v1 import StoreChannelDataBulkParams``)
+# without reaching into the mixin classes. ``DownsampleParams`` is already a
+# module-level class and is re-exported via the import above.
+StoreChannelDataParams = DataToolMixin.StoreChannelDataParams
+StoreChannelSeriesParams = DataToolMixin.StoreChannelSeriesParams
+StoreChannelDataBulkParams = DataToolMixin.StoreChannelDataBulkParams
+LoadChannelDataParams = DataToolMixin.LoadChannelDataParams
+ChannelDataPoint = DataToolMixin.ChannelDataPoint
+CreateToolParams = TSDCMixin.CreateToolParams
+DeleteToolParams = TSDCMixin.DeleteToolParams
+WriteToolChannelRawParams = TSDCMixin.WriteToolChannelRawParams
+ReadToolChannelRawParams = TSDCMixin.ReadToolChannelRawParams

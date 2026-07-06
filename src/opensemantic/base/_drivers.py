@@ -22,6 +22,25 @@ from opensemantic.base._controller_logic import (
 _logger = logging.getLogger(__name__)
 
 
+def _stride_decimate(rows: list, max_points: int) -> list:
+    """Reduce ``rows`` to about ``max_points`` by even striding.
+
+    Always keeps the first and last row so the series still spans its
+    full window. Used as the SQLite fallback when server-side
+    downsampling is unavailable.
+    """
+    n = len(rows)
+    if max_points <= 2 or n <= max_points:
+        return rows
+    step = n / float(max_points)
+    picked = [rows[min(int(i * step), n - 1)] for i in range(max_points)]
+    if picked[0] is not rows[0]:
+        picked[0] = rows[0]
+    if picked[-1] is not rows[-1]:
+        picked[-1] = rows[-1]
+    return picked
+
+
 class DatabaseDriver:
     """Base class with shared buffer management.
 
@@ -48,8 +67,18 @@ class DatabaseDriver:
         end: Optional[Any] = None,
         filters: Optional[list] = None,
         limit: Optional[int] = None,
+        max_points: Optional[int] = None,
+        bin_size: Optional[str] = None,
+        downsample_method: Optional[str] = None,
+        edge_anchors: Optional[bool] = None,
     ) -> list:
-        """Read rows from the backend."""
+        """Read rows from the backend.
+
+        The trailing ``max_points`` / ``bin_size`` / ``downsample_method`` /
+        ``edge_anchors`` parameters request server-side downsampling and are
+        honored by backends that support it (PostgREST/TimescaleDB); other
+        backends ignore or approximate them.
+        """
 
     @abstractmethod
     async def create_tool(self, tool_osw_id: str):
@@ -189,6 +218,10 @@ class LocalDatabaseDriver(DatabaseDriver):
         end: Optional[Any] = None,
         filters: Optional[list] = None,
         limit: Optional[int] = None,
+        max_points: Optional[int] = None,
+        bin_size: Optional[str] = None,
+        downsample_method: Optional[str] = None,
+        edge_anchors: Optional[bool] = None,
     ) -> list:
         query, query_params = build_sqlite_read_query(
             tool_osw_id=tool_osw_id,
@@ -200,7 +233,12 @@ class LocalDatabaseDriver(DatabaseDriver):
         )
         _logger.debug("Executing query: %s with params: %s", query, query_params)
         rows = await self.fetchall(query, tuple(query_params))
-        return parse_sqlite_rows(rows)
+        parsed = parse_sqlite_rows(rows)
+        # SQLite has no time_bucket; approximate downsampling with a simple
+        # row-stride decimation that keeps the first and last point.
+        if max_points and len(parsed) > max_points:
+            parsed = _stride_decimate(parsed, max_points)
+        return parsed
 
     async def delete_by_ids(self, tool_osw_id: str, ids: List[int]):
         if not ids:
@@ -364,8 +402,28 @@ class PostgrestDatabaseDriver(DatabaseDriver):
         end: Optional[Any] = None,
         filters: Optional[list] = None,
         limit: Optional[int] = None,
+        max_points: Optional[int] = None,
+        bin_size: Optional[str] = None,
+        downsample_method: Optional[str] = None,
+        edge_anchors: Optional[bool] = None,
     ) -> list:
         self._ensure_client()
+        # Route to the server-side downsampling RPC when requested. Any
+        # failure (RPC missing on an older pgstack, network error, ...)
+        # falls through to the plain full-resolution read below.
+        if max_points is not None or bin_size is not None or downsample_method:
+            rows = await self._read_downsampled(
+                tool_osw_id,
+                channel_osw_id,
+                start,
+                end,
+                max_points,
+                bin_size,
+                downsample_method,
+                edge_anchors,
+            )
+            if rows is not None:
+                return rows
         if channel_osw_id:
             query = (
                 self.client.table(tool_osw_id)
@@ -398,6 +456,47 @@ class PostgrestDatabaseDriver(DatabaseDriver):
 
         res = await query.execute()
         return res.data if res.data else []
+
+    async def _read_downsampled(
+        self,
+        tool_osw_id: str,
+        channel_osw_id: Optional[str],
+        start: Optional[Any],
+        end: Optional[Any],
+        max_points: Optional[int],
+        bin_size: Optional[str],
+        downsample_method: Optional[str],
+        edge_anchors: Optional[bool],
+    ) -> Optional[list]:
+        """Call the server-side downsampling RPC.
+
+        Returns the bucketed rows (same ``{"ts","ch","data"}`` shape as the
+        plain read), or ``None`` when the RPC is unavailable/failed so the
+        caller can fall back to a full-resolution read.
+        """
+        params: Dict[str, Any] = {"osw_tool": tool_osw_id}
+        if channel_osw_id:
+            params["ch_id"] = channel_osw_id
+        if start is not None:
+            params["ts_start"] = start.isoformat()
+        if end is not None:
+            params["ts_end"] = end.isoformat()
+        if max_points is not None:
+            params["max_points"] = max_points
+        if bin_size is not None:
+            params["bin_size"] = bin_size
+        if downsample_method:
+            params["method"] = downsample_method
+        if edge_anchors is not None:
+            params["edge_anchors"] = edge_anchors
+        try:
+            res = await self.client.rpc("downsample_tool_channel", params).execute()
+            return res.data if res.data else []
+        except Exception as e:
+            _logger.debug(
+                "downsample RPC unavailable (%s); falling back to full read", e
+            )
+            return None
 
     async def _flush_offline_buffer(self):
         """Background task that syncs offline-buffered data to remote."""

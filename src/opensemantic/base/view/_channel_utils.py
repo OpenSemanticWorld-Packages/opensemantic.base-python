@@ -297,6 +297,21 @@ def resolve_value_type(channel: Any) -> str:
     return "number"
 
 
+def resolve_downsample_method(channel: Any, config_method: str = "auto") -> str:
+    """Pick the downsampling strategy for a channel.
+
+    When ``config_method`` is an explicit strategy ('sample'/'average'/
+    'minmax') it is returned as-is. When it is 'auto' (or empty), numeric
+    channels (quantity/number/composite) use 'minmax' (spike-safe, real
+    points) and text/unknown channels use 'sample'.
+    """
+    if config_method and config_method != "auto":
+        return config_method
+    if resolve_value_type(channel) in ("quantity", "number", "composite"):
+        return "minmax"
+    return "sample"
+
+
 def _is_characteristic_subclass(cls: type) -> bool:
     """Check if a class is a Characteristic subclass (v1 or v2)."""
     if not isinstance(cls, type):
@@ -605,6 +620,7 @@ _UI_STRINGS = {
     "archive": {"en": "Archive", "de": "Archiv"},
     "live": {"en": "Live", "de": "Live"},
     "clear_cache": {"en": "Clear Cache", "de": "Cache leeren"},
+    "load_range": {"en": "Load current range", "de": "Aktuellen Bereich laden"},
 }
 
 
