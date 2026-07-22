@@ -12,6 +12,12 @@ tests/.env
 *.orig
 *.log
 *.pot
+
+# Local test/demo databases (created by examples and tests)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 __pycache__/*
 .cache/*
 .*.swp

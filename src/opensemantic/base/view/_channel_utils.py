@@ -621,6 +621,11 @@ _UI_STRINGS = {
     "live": {"en": "Live", "de": "Live"},
     "clear_cache": {"en": "Clear Cache", "de": "Cache leeren"},
     "load_range": {"en": "Load current range", "de": "Aktuellen Bereich laden"},
+    "export": {"en": "Export", "de": "Export"},
+    "download_csv": {"en": "Download CSV", "de": "CSV herunterladen"},
+    "download_xlsx": {"en": "Download XLSX", "de": "XLSX herunterladen"},
+    "download_plot": {"en": "Download plot (HTML)", "de": "Plot (HTML) herunterladen"},
+    "no_data": {"en": "No data", "de": "Keine Daten"},
 }
 
 
