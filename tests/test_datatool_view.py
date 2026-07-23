@@ -13,6 +13,11 @@ from opensemantic.base.v1 import (
     DataTool,
     DataToolController,
 )
+from opensemantic.base.view import (
+    DataToolPlotControlsConfig,
+    DataToolViewConfig,
+    GroupingMode,
+)
 from opensemantic.base.view._channel_utils import (
     build_tree_source,
     get_available_units,
@@ -25,7 +30,6 @@ from opensemantic.base.view._channel_utils import (
     resolve_characteristic_label,
     resolve_value_type,
 )
-from opensemantic.base.view._config import DashboardConfig, GroupingMode, PlotConfig
 from opensemantic.base.view._data_cache import ChannelDataCache, _compute_gaps
 from opensemantic.characteristics.quantitative.v1 import (
     ForcePerAreaUnit,
@@ -401,15 +405,17 @@ class TestChannelDataCache:
 
 class TestConfig:
     def test_default_config(self):
-        config = DashboardConfig()
+        config = DataToolViewConfig()
         assert config.lang == "en"
         assert config.plot.auto_fetch is True
         assert config.plot.row_limit == 10000
         assert config.plot.grouping == GroupingMode.UNIQUE
 
     def test_config_serialization(self):
-        config = DashboardConfig(lang="de", plot=PlotConfig(row_limit=5000))
+        config = DataToolViewConfig(
+            lang="de", plot=DataToolPlotControlsConfig(row_limit=5000)
+        )
         d = config.model_dump()
-        restored = DashboardConfig(**d)
+        restored = DataToolViewConfig(**d)
         assert restored.lang == "de"
         assert restored.plot.row_limit == 5000

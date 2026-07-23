@@ -22,7 +22,6 @@ from typing import Any, List, Tuple
 
 import panel as pn
 from bokeh.palettes import Category10_10
-from panelini.panels.jsoneditor import JsonEditor
 
 from opensemantic.base.view._channel_utils import (
     _get_unit_symbol_map,
@@ -32,6 +31,11 @@ from opensemantic.base.view._channel_utils import (
     resolve_characteristic_class,
     resolve_characteristic_label,
     resolve_value_type,
+)
+from opensemantic.base.view._config import (
+    BaseViewConfig,
+    DownsampleMethod,
+    GroupingMode,
 )
 
 _logger = logging.getLogger(__name__)
@@ -142,7 +146,15 @@ def _dequantify(df):
 
 
 class BaseDataView:
-    """Mixin with the UI/plot pieces shared by the archive views."""
+    """Mixin with the UI/plot pieces shared by the archive views.
+
+    A concrete view owns its config class via the ``config_cls`` attribute (a
+    ``BaseViewConfig`` subclass) and provides the config->view ``_apply_config``
+    hook; ``set_config`` / ``get_config`` / ``on_config_change`` are inherited.
+    """
+
+    #: The config class this view owns (overridden by each concrete view).
+    config_cls = BaseViewConfig
 
     @property
     def lang(self) -> str:
@@ -179,8 +191,137 @@ class BaseDataView:
             self._unit_controls.append(dropdown)
 
     def _on_unit_change(self, group_key: str, event):
+        if getattr(self, "_applying_config", False):
+            return
         self._unit_selections[group_key] = event.new
+        self._config.plot.unit_selections = dict(self._unit_selections)
         self._refresh_plot()
+        self._emit_config_change()
+
+    # -- Shared plot-control widgets (a native field per config property) ----
+    #
+    # Every ``PlotControlsConfig`` property is editable through a native widget
+    # here, so no JSON editor is needed. Each writes through to ``self._config``
+    # and emits a change; ``_apply_config`` sets them back. Views place these in
+    # their controls card and supply the ``_regroup`` / ``_has_active_selection``
+    # hooks.
+
+    def _build_grouping_control(self):
+        options = {
+            _t("group_none", self.lang): GroupingMode.NONE.value,
+            _t("group_unique", self.lang): GroupingMode.UNIQUE.value,
+            _t("group_sub", self.lang): GroupingMode.SUB.value,
+        }
+        self._grouping_select = pn.widgets.Select(
+            name=_t("grouping", self.lang),
+            options=options,
+            value=self._config.plot.grouping.value,
+        )
+        self._grouping_select.param.watch(self._on_grouping_change, ["value"])
+        return self._grouping_select
+
+    def _on_grouping_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
+        self._config.plot.grouping = GroupingMode(event.new)
+        self._regroup()
+        self._update_unit_controls()
+        self._refresh_plot()
+        self._emit_config_change()
+
+    def _build_cache_control(self):
+        self._cache_cb = pn.widgets.Checkbox(
+            name=_t("cache_enabled", self.lang),
+            value=self._config.plot.cache_enabled,
+        )
+        self._cache_cb.param.watch(self._on_cache_enabled_change, ["value"])
+        return self._cache_cb
+
+    def _on_cache_enabled_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
+        self._config.plot.cache_enabled = event.new
+        if getattr(self, "_cache", None) is not None:
+            self._cache.enabled = event.new
+        self._emit_config_change()
+
+    def _build_downsample_controls(self):
+        ds = self._config.plot.downsample
+        self._ds_enabled = pn.widgets.Checkbox(
+            name=_t("downsample", self.lang), value=ds.enabled
+        )
+        self._ds_max_points = pn.widgets.IntInput(
+            name=_t("max_points", self.lang), value=ds.max_points, start=2, step=100
+        )
+        self._ds_method = pn.widgets.Select(
+            name=_t("ds_method", self.lang),
+            options={_t("ds_" + m.value, self.lang): m.value for m in DownsampleMethod},
+            value=ds.method.value,
+        )
+        self._ds_edge = pn.widgets.Checkbox(
+            name=_t("edge_anchors", self.lang), value=ds.edge_anchors
+        )
+        self._ds_enabled.param.watch(
+            lambda e: self._on_downsample_change("enabled", e.new), ["value"]
+        )
+        self._ds_max_points.param.watch(
+            lambda e: self._on_downsample_change("max_points", e.new), ["value"]
+        )
+        self._ds_method.param.watch(
+            lambda e: self._on_downsample_change("method", e.new), ["value"]
+        )
+        self._ds_edge.param.watch(
+            lambda e: self._on_downsample_change("edge_anchors", e.new), ["value"]
+        )
+        self._downsample_card = pn.Card(
+            pn.Column(
+                self._ds_enabled,
+                self._ds_max_points,
+                self._ds_method,
+                self._ds_edge,
+                sizing_mode="stretch_width",
+            ),
+            title=_t("downsample", self.lang),
+            collapsed=True,
+            sizing_mode="stretch_width",
+            margin=(6, 5),
+        )
+        return self._downsample_card
+
+    def _on_downsample_change(self, field, value):
+        if getattr(self, "_applying_config", False):
+            return
+        if field == "method":
+            value = DownsampleMethod(value)
+        setattr(self._config.plot.downsample, field, value)
+        self._emit_config_change()
+        if self._config.plot.auto_fetch and self._has_active_selection():
+            self._trigger_load()
+
+    def _regroup(self):  # pragma: no cover - view hook
+        """Recompute the channel grouping after a grouping-mode change."""
+
+    def _has_active_selection(self) -> bool:  # pragma: no cover - view hook
+        """Whether anything is selected (controls whether a change reloads)."""
+        return False
+
+    def _apply_plot_control_widgets(self, config):
+        """Set the shared plot-control widgets from the config (guarded)."""
+        if getattr(self, "_grouping_select", None) is not None:
+            self._grouping_select.value = config.plot.grouping.value
+        if getattr(self, "_cache_cb", None) is not None:
+            self._cache_cb.value = config.plot.cache_enabled
+        ds = config.plot.downsample
+        for attr, name in (
+            ("enabled", "_ds_enabled"),
+            ("max_points", "_ds_max_points"),
+            ("edge_anchors", "_ds_edge"),
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.value = getattr(ds, attr)
+        if getattr(self, "_ds_method", None) is not None:
+            self._ds_method.value = ds.method.value
 
     # -- Plot / log / config cards --
 
@@ -394,27 +535,143 @@ class BaseDataView:
             sizing_mode="stretch_width",
         )
 
-    def _build_config_editor(self):
-        schema = self._config.model_json_schema()
-        self._config_editor = JsonEditor(
-            value=self._config.model_dump(),
-            options={
-                "schema": schema,
-                "no_additional_properties": True,
-                "disable_edit_json": False,
-            },
-        )
-        self._config_editor.param.watch(self._on_config_editor_change, ["value"])
-        self._config_card = pn.Card(
-            pn.Column(
-                self._config_editor,
-                sizing_mode="stretch_width",
-                max_height=1000,
-                scroll=True,
-            ),
-            title=_t("config", self.lang),
-            collapsed=True,
-        )
+    # -- Config binding (bidirectional) -------------------------------------
+    #
+    # The config is the single, JSON-serializable source of truth. User edits
+    # write through into ``self._config`` and emit a change; programmatic / URL
+    # updates come in via ``set_config`` and are applied to the widgets. A
+    # single ``_applying_config`` flag guards against feedback loops.
+
+    @classmethod
+    def _coerce_config(cls, config):
+        """Return a config of this view's ``config_cls``.
+
+        ``None`` yields a default; a config that is already the right class (or a
+        subclass) passes through; any other ``BaseViewConfig`` is upgraded by
+        re-validating its dump, so passing a base config to a concrete view keeps
+        working (missing component fields take their defaults).
+        """
+        if config is None:
+            return cls.config_cls()
+        if isinstance(config, cls.config_cls):
+            return config
+        return cls.config_cls.model_validate(config.model_dump())
+
+    def get_config(self):
+        """Return the current config instance (the concrete subclass)."""
+        return self._config
+
+    def set_config(self, config) -> None:
+        """Apply a config as the new state - the single apply path.
+
+        Used by URL sync and programmatic/host callers. Pushes every field into
+        the widgets/state (guarded so it does not loop back), then notifies
+        ``on_config_change`` listeners.
+        """
+        old = getattr(self, "_config", None)
+        self._applying_config = True
+        try:
+            self._config = config
+            self._config_cls = type(config)
+            self._apply_config(old, config)
+        finally:
+            self._applying_config = False
+        self._notify_config_change()
+
+    def on_config_change(self, callback) -> None:
+        """Register a callback invoked with the config on any change.
+
+        A host that composes several views uses this to keep its aggregate
+        (parent) config in sync with each view's sub-config.
+        """
+        self._config_change_cbs.append(callback)
+
+    @property
+    def _config_change_cbs(self) -> List[Any]:
+        cbs = getattr(self, "_config_change_cbs_list", None)
+        if cbs is None:
+            cbs = []
+            self._config_change_cbs_list = cbs
+        return cbs
+
+    def _emit_config_change(self) -> None:
+        """Called after a user-driven write-through mutates ``self._config``."""
+        if getattr(self, "_applying_config", False):
+            return
+        self._notify_config_change()
+
+    def _notify_config_change(self) -> None:
+        for cb in list(self._config_change_cbs):
+            try:
+                cb(self._config)
+            except Exception as e:  # pragma: no cover - host callback guard
+                _logger.error("on_config_change callback failed: %s", e)
+
+    def _apply_initial_config(self) -> None:
+        """Render any non-default state carried by the initial config.
+
+        Called at the end of a view's ``__init__`` so a config passed in with a
+        tree source / units / time range is reflected in the UI immediately.
+        """
+        if self._config_has_state(self._config):
+            self.set_config(self._config)
+
+    def _config_has_state(self, config) -> bool:
+        """Whether the initial config carries non-default UI state to restore.
+
+        Returning ``True`` makes ``__init__`` call ``set_config(config)`` once,
+        so the view opens already reflecting a saved tree selection, unit choices
+        or time window (and, if auto-fetch is on, loads that data). Returning
+        ``False`` skips that initial apply for a fresh/default config, avoiding an
+        unnecessary tree rebuild and data fetch. Views override to also inspect
+        their own tree component(s); the base checks the shared unit selections.
+        """
+        return bool(getattr(config.plot, "unit_selections", None))
+
+    def _enable_url_sync(self, param_name: str = "config", mode=None) -> None:
+        """Opt-in: bind this view's config to the browser URL.
+
+        Loads the config from the URL when a session is ready (if present) and
+        writes it back on every change, using ``mode`` (default
+        ``COMPRESSED_BASE64``). Default off, so a host that owns its own
+        persistence - e.g. by composing several views into one parent config -
+        is unaffected; that host would URL-sync the parent instead.
+        """
+        from opensemantic.base.view.url_config import UrlConfig, UrlConfigMode
+
+        if mode is None:
+            mode = UrlConfigMode.COMPRESSED_BASE64
+        self._url_config = UrlConfig(self._config_cls, param_name=param_name)
+
+        def _load():
+            try:
+                if self._url_config.has_config():
+                    self.set_config(self._url_config.get_config())
+            except Exception as e:  # pragma: no cover - URL is best effort
+                _logger.warning("URL config load failed: %s", e)
+            self.on_config_change(lambda cfg: self._url_config.set_config(cfg, mode))
+
+        # pn.state.location is only populated once a session loads, so defer.
+        try:
+            pn.state.onload(_load)
+        except Exception:  # pragma: no cover - no active session (tests)
+            _load()
+
+    def _apply_config(self, old, new) -> None:
+        """Push shared config fields into the widgets/state.
+
+        Runs inside ``set_config`` with ``_applying_config`` set, so widget
+        watchers short-circuit. Subclasses override to also apply their
+        selection / time range / grouping and to refresh, calling ``super()``.
+        """
+        self._unit_selections = dict(getattr(new.plot, "unit_selections", {}) or {})
+        if getattr(self, "_auto_fetch_cb", None) is not None:
+            self._auto_fetch_cb.value = new.plot.auto_fetch
+        if getattr(self, "_row_limit_input", None) is not None:
+            self._row_limit_input.value = new.plot.row_limit
+        if getattr(self, "_cache", None) is not None:
+            self._cache.enabled = new.plot.cache_enabled
+        self._apply_plot_control_widgets(new)
 
     # -- Plot helpers --
 
@@ -533,9 +790,6 @@ class BaseDataView:
         raise NotImplementedError
 
     async def _load_and_plot(self):  # pragma: no cover - overridden
-        raise NotImplementedError
-
-    def _on_config_editor_change(self, event):  # pragma: no cover - overridden
         raise NotImplementedError
 
     @property

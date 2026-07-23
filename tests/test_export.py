@@ -20,11 +20,14 @@ from opensemantic.base.v1 import (  # noqa: E402
     DataToolController,
 )
 from opensemantic.base.view import DataToolView  # noqa: E402
+from opensemantic.base.view import (  # noqa: E402
+    DataToolPlotControlsConfig,
+    DataToolViewConfig,
+)
 from opensemantic.base.view._base_view import (  # noqa: E402
     BaseDataView,
     _series_to_dataframe,
 )
-from opensemantic.base.view._config import DashboardConfig, PlotConfig  # noqa: E402
 from opensemantic.characteristics.quantitative.v1 import (  # noqa: E402
     Temperature,
     TemperatureUnit,
@@ -177,7 +180,7 @@ def _loaded_view():
 
     view = DataToolView(
         controllers=[ctrl],
-        config=DashboardConfig(plot=PlotConfig(auto_fetch=False)),
+        config=DataToolViewConfig(plot=DataToolPlotControlsConfig(auto_fetch=False)),
         title="Export Test",
         embeddable=True,
     )

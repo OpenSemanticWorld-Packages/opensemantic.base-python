@@ -26,6 +26,7 @@ from bokeh.models import ColumnDataSource
 from bokeh.plotting import figure as bk_figure
 from panelini import Panelini
 from panelini.panels.wunderbaum import Wunderbaum
+from pydantic import ConfigDict, Field
 
 from opensemantic.base.view._base_view import COLORS, BaseDataView
 from opensemantic.base.view._channel_utils import (
@@ -34,8 +35,9 @@ from opensemantic.base.view._channel_utils import (
     group_channels_by_characteristic,
     resolve_downsample_method,
     resolve_value_type,
+    to_utc,
 )
-from opensemantic.base.view._config import DashboardConfig
+from opensemantic.base.view._config import BaseViewConfig, TreeConfig
 from opensemantic.base.view._data_cache import ChannelDataCache
 from opensemantic.base.view._process_utils import (
     build_concrete_tree,
@@ -66,14 +68,29 @@ def _pt(key: str, lang: str = "en") -> str:
     return entry.get(lang, entry.get("en", key))
 
 
-def _as_utc(value: Any) -> Optional[dt.datetime]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        value = dt.datetime.fromisoformat(value)
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=dt.timezone.utc)
-    return value
+class ProcessObjectViewConfig(BaseViewConfig):
+    """Config for :class:`ProcessObjectView` (process/object-centered).
+
+    Composes two trees (object + process); their ``source`` fields carry the
+    checked selection in Wunderbaum's native format. Process traces use relative
+    time, so the plot has no absolute ``time_range``.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "ProcessObjectViewConfig",
+            "defaultProperties": [
+                "controllers",
+                "lang",
+                "object_tree",
+                "process_tree",
+                "plot",
+            ],
+        }
+    )
+
+    object_tree: TreeConfig = Field(default_factory=TreeConfig, title="Object tree")
+    process_tree: TreeConfig = Field(default_factory=TreeConfig, title="Process tree")
 
 
 class ProcessObjectView(BaseDataView):
@@ -98,19 +115,26 @@ class ProcessObjectView(BaseDataView):
         ``main_cards`` for a host app instead).
     """
 
+    config_cls = ProcessObjectViewConfig
+
     def __init__(
         self,
         objects: Optional[List[Any]] = None,
         processes: Optional[List[Any]] = None,
         controllers: Optional[List[Any]] = None,
-        config: Optional[DashboardConfig] = None,
+        config: Optional[BaseViewConfig] = None,
         title: str = "Process Dashboard",
         embeddable: bool = False,
+        url_sync: bool = False,
+        url_mode=None,
     ):
         self._objects = objects or []
         self._processes = processes or []
         self._controllers = controllers or []
-        self._config = config or DashboardConfig()
+        self._config = type(self)._coerce_config(config)
+        self._config_cls = type(self._config)
+        self._url_sync = url_sync
+        self._url_mode = url_mode
         self._title = title
         self._embeddable = embeddable
 
@@ -130,7 +154,7 @@ class ProcessObjectView(BaseDataView):
         self._selected_aggs: List[Dict[str, Any]] = []
         self._groups: Dict[str, List[Tuple[Any, Any]]] = {}
         self._group_of: Dict[str, str] = {}
-        self._unit_selections: Dict[str, str] = {}
+        self._unit_selections: Dict[str, str] = dict(self._config.plot.unit_selections)
         self._traces: List[Dict[str, Any]] = []
         self._t0: Dict[Tuple[Any, Any], dt.datetime] = {}
 
@@ -140,8 +164,11 @@ class ProcessObjectView(BaseDataView):
         self._build_controls()
         self._build_plot()
         self._build_log_console()
-        self._build_config_editor()
         self._build_layout()
+
+        self._apply_initial_config()
+        if self._url_sync:
+            self._enable_url_sync(mode=self._url_mode)
 
     # -- Trees --
 
@@ -194,13 +221,22 @@ class ProcessObjectView(BaseDataView):
         )
 
     def _on_change(self, *args):
+        if getattr(self, "_applying_config", False):
+            return
         try:
             self._recompute_selection()
             self._update_unit_controls()
+            self._write_selection_to_config()
             if self._config.plot.auto_fetch:
                 self._trigger_load()
+            self._emit_config_change()
         except Exception as e:
             _logger.error("Error in _on_change: %s", e)
+
+    def _write_selection_to_config(self):
+        """Mirror the checked object / aggregate keys into the config."""
+        self._config.object_tree.selected = get_selected_keys(self._obj_tree.source)
+        self._config.process_tree.selected = get_selected_keys(self._proc_tree.source)
 
     def _recompute_selection(self):
         obj_keys = get_selected_keys(self._obj_tree.source)
@@ -257,43 +293,69 @@ class ProcessObjectView(BaseDataView):
         self._controls_card = pn.Card(
             self._load_button,
             self._auto_fetch_cb,
+            self._build_grouping_control(),
             self._row_limit_input,
+            self._build_cache_control(),
             self._clear_cache_button,
+            self._build_downsample_controls(),
             self._unit_controls,
             self._build_export_toolbar(),
             title=_t("plot_controls", self.lang),
         )
 
+    def _regroup(self):
+        self._recompute_selection()
+
+    def _has_active_selection(self) -> bool:
+        return bool(self._selected_objects and self._selected_aggs)
+
     def _on_auto_fetch_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
         self._config.plot.auto_fetch = event.new
+        self._emit_config_change()
 
     def _on_row_limit_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
         self._config.plot.row_limit = event.new
+        self._emit_config_change()
 
     def _on_clear_cache(self, event):
         self._cache.clear_cache()
 
-    # -- Config editor change handler (view-specific) --
+    # -- Config apply (config -> view); base handles the JsonEditor wiring --
 
-    def _on_config_editor_change(self, event):
-        if not event.new or not isinstance(event.new, dict):
-            return
-        try:
-            new_config = DashboardConfig.model_validate(event.new)
-        except Exception as e:
-            _logger.debug("Incomplete config value, skipping: %s", e)
-            return
-        old_config = self._config
-        self._config = new_config
+    def _apply_config(self, old, new):
+        """Apply a config to the widgets/state (see BaseDataView.set_config)."""
+        super()._apply_config(old, new)  # units + plot-control widgets
+        self._apply_selection(new)
+        self._recompute_selection()
+        self._update_unit_controls()
+        self._refresh_plot()
+        if new.plot.auto_fetch and self._selected_objects and self._selected_aggs:
+            self._trigger_load()
 
-        if old_config.plot.grouping != new_config.plot.grouping:
-            self._recompute_selection()
-            self._update_unit_controls()
-            self._refresh_plot()
-        if old_config.plot.cache_enabled != new_config.plot.cache_enabled:
-            self._cache.enabled = new_config.plot.cache_enabled
-        self._auto_fetch_cb.value = new_config.plot.auto_fetch
-        self._row_limit_input.value = new_config.plot.row_limit
+    def _apply_selection(self, config):
+        """Rebuild the object/process trees with the config's keys checked."""
+        osrc = build_object_tree_source(self._concrete, self.lang)
+        self._mark_selected(osrc, set(config.object_tree.selected or []))
+        self._obj_tree.set_source(osrc)
+        psrc = build_process_tree_source(self._aggregated, self.lang)
+        self._mark_selected(psrc, set(config.process_tree.selected or []))
+        self._proc_tree.set_source(psrc)
+
+    def _mark_selected(self, nodes, keys):
+        for n in nodes:
+            n["selected"] = n.get("key") in keys
+            self._mark_selected(n.get("children", []), keys)
+
+    def _config_has_state(self, config):
+        return (
+            bool(config.object_tree.selected)
+            or bool(config.process_tree.selected)
+            or bool(config.plot.unit_selections)
+        )
 
     # -- Data loading (_trigger_load comes from BaseDataView) --
 
@@ -308,8 +370,8 @@ class ProcessObjectView(BaseDataView):
         for obj_entry in self._selected_objects:
             for agg in self._selected_aggs:
                 for ctrl, ch, proc in resolve_aggregated_channel(obj_entry, agg):
-                    start = _as_utc(getattr(proc, "start_date_time", None))
-                    end = _as_utc(getattr(proc, "end_date_time", None))
+                    start = to_utc(getattr(proc, "start_date_time", None))
+                    end = to_utc(getattr(proc, "end_date_time", None))
                     if start is None:
                         continue
                     method = (
@@ -354,7 +416,7 @@ class ProcessObjectView(BaseDataView):
             if not tr["points"]:
                 continue
             key = (entity_iri(tr["object"]), entity_iri(tr["process"]))
-            mn = min(_as_utc(p.timestamp) for p in tr["points"])
+            mn = min(to_utc(p.timestamp) for p in tr["points"])
             cur = self._t0.get(key)
             if cur is None or mn < cur:
                 self._t0[key] = mn
@@ -478,7 +540,7 @@ class ProcessObjectView(BaseDataView):
         ys: List[Any] = []
 
         for pt in points:
-            ts = _as_utc(pt.timestamp)
+            ts = to_utc(pt.timestamp)
             secs = (ts - t0).total_seconds()
             v = self._numeric(pt.value, ch, target_unit_name)
             if v is None:
@@ -500,7 +562,7 @@ class ProcessObjectView(BaseDataView):
             t0 = self._t0.get(key)
             prefix = f"{tr['object_label']} · {tr['process_label']}"
             for pt in tr["points"]:
-                ts = _as_utc(pt.timestamp)
+                ts = to_utc(pt.timestamp)
                 secs = (ts - t0).total_seconds() if t0 is not None else 0.0
                 val = pt.value
                 if hasattr(val, "value"):
@@ -542,19 +604,17 @@ class ProcessObjectView(BaseDataView):
                 self._obj_tree_card,
                 self._proc_tree_card,
                 self._controls_card,
-                self._config_card,
             ]
         )
         self._app.main_set([self._plot_card, self._log_card])
 
     @property
     def sidebar_cards(self):
-        """Sidebar cards (object tree, process tree, controls, config)."""
+        """Sidebar cards (object tree, process tree, controls)."""
         return [
             self._obj_tree_card,
             self._proc_tree_card,
             self._controls_card,
-            self._config_card,
         ]
 
     @property

@@ -5,10 +5,23 @@ resolves characteristic metadata, handles unit discovery and grouping.
 No UI dependencies (no Panel/Plotly imports).
 """
 
+import datetime as dt
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from opensemantic.base.view._config import GroupingMode
+
+
+def to_utc(value: Any) -> Optional[dt.datetime]:
+    """Coerce a datetime (or ISO string) to tz-aware UTC; naive is read as UTC."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = dt.datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value
+
 
 # -- Display label helpers --
 
@@ -172,6 +185,14 @@ def get_unit_enum(channel: Any) -> Optional[type]:
 
     if isinstance(unit_type, type) and issubclass(unit_type, enum.Enum):
         return unit_type
+    return None
+
+
+def get_unit_enum_from_value(value: Any) -> Optional[type]:
+    """Resolve the UnitEnum type from a typed value instance (via its ``unit``)."""
+    unit = getattr(value, "unit", None)
+    if unit is not None:
+        return type(unit) if hasattr(type(unit), "__members__") else None
     return None
 
 
@@ -621,6 +642,19 @@ _UI_STRINGS = {
     "live": {"en": "Live", "de": "Live"},
     "clear_cache": {"en": "Clear Cache", "de": "Cache leeren"},
     "load_range": {"en": "Load current range", "de": "Aktuellen Bereich laden"},
+    "cache_enabled": {"en": "Cache enabled", "de": "Cache aktiviert"},
+    "grouping": {"en": "Grouping", "de": "Gruppierung"},
+    "group_none": {"en": "None", "de": "Keine"},
+    "group_unique": {"en": "By characteristic", "de": "Nach Charakteristik"},
+    "group_sub": {"en": "By sub-characteristic", "de": "Nach Subcharakteristik"},
+    "downsample": {"en": "Downsampling", "de": "Downsampling"},
+    "max_points": {"en": "Max points", "de": "Maximale Punkte"},
+    "ds_method": {"en": "Method", "de": "Methode"},
+    "ds_auto": {"en": "Auto", "de": "Auto"},
+    "ds_sample": {"en": "Sample", "de": "Stichprobe"},
+    "ds_average": {"en": "Average", "de": "Mittelwert"},
+    "ds_minmax": {"en": "Min/Max", "de": "Min/Max"},
+    "edge_anchors": {"en": "Edge anchors", "de": "Randpunkte"},
     "export": {"en": "Export", "de": "Export"},
     "download_csv": {"en": "Download CSV", "de": "CSV herunterladen"},
     "download_xlsx": {"en": "Download XLSX", "de": "XLSX herunterladen"},

@@ -23,8 +23,12 @@ from opensemantic.base.v1 import (
     DataTool,
     DataToolController,
 )
-from opensemantic.base.view import DataToolView
-from opensemantic.base.view._config import DashboardConfig, PlotConfig
+from opensemantic.base.view import (
+    DataToolPlotControlsConfig,
+    DataToolView,
+    DataToolViewConfig,
+    UrlConfigMode,
+)
 from opensemantic.characteristics.quantitative.v1 import (
     Characteristic,
     ForcePerAreaUnit,
@@ -234,14 +238,20 @@ nest_asyncio.apply()
 
 controllers = asyncio.run(setup_data())
 
-config = DashboardConfig(
+config = DataToolViewConfig(
     lang="en",
-    plot=PlotConfig(auto_fetch=True, row_limit=10000),
+    plot=DataToolPlotControlsConfig(auto_fetch=True, row_limit=10000),
 )
 
+# Persist the full dashboard state in the URL. COMPRESSED_BASE64 keeps the URL
+# short even though the native tree source is large (many channels); selection,
+# units, time range and plot options all round-trip. (PLAIN_KEYS suits small
+# configs - see the composed demo - not a big channel tree.)
 view = DataToolView(
     controllers=controllers,
     config=config,
+    url_sync=True,
+    url_mode=UrlConfigMode.COMPRESSED_BASE64,
     title="DataTool Archive View",
 )
 

@@ -120,7 +120,8 @@ Features:
 - Unit conversion via dropdown (e.g. K to C, Pa to hPa)
 - Composite channel splitting (e.g. AirQuality into temperature + pressure sub-plots)
 - Text channel log console with timestamped entries
-- Configurable via JsonEditor (grouping, auto-fetch, row limit, cache)
+- Native Plot Controls with a widget for every config field (grouping,
+  auto-fetch, row limit, cache, downsampling, units, time range)
 
 ![Archive Demo](docs/archive_demo.gif)
 
@@ -139,12 +140,18 @@ Features:
 *Text channel log console with timestamped entries*
 
 ```python
-from opensemantic.base.view import DataToolView
-from opensemantic.base.view._config import DashboardConfig, PlotConfig
+from opensemantic.base.view import (
+    DataToolView,
+    DataToolViewConfig,
+    DataToolPlotControlsConfig,
+)
 
 view = DataToolView(
     controllers=[ctrl],
-    config=DashboardConfig(lang="en", plot=PlotConfig(auto_fetch=True)),
+    config=DataToolViewConfig(
+        lang="en", plot=DataToolPlotControlsConfig(auto_fetch=True)
+    ),
+    url_sync=True,  # optional: persist the full state in the URL
     title="My Dashboard",
 )
 view.servable()  # for panel serve
@@ -171,16 +178,46 @@ The rendered figures are exposed via `view.figures` so a host app can add its
 own annotations; `view.export_series()` returns the plotted series as tidy
 records.
 
+### Configuration and URL sync
+
+The config is the complete, JSON-serializable state of a view, composed to
+mirror the panels: component configs (`TreeConfig`, `PlotControlsConfig`,
+`DownsampleConfig`) make up a view's config (`DataToolViewConfig`,
+`ProcessObjectViewConfig`), and a host composes several of those into one
+aggregate model.
+
+- Each view owns its config class (`view.config_cls`) and exposes
+  `get_config()` / `set_config(cfg)` / `on_config_change(cb)`. User edits write
+  through into the config; `set_config` applies a config back to the widgets.
+- `TreeConfig.source` reuses Wunderbaum's native node JSON, so the selection
+  round-trips without a parallel model.
+- `UrlConfig[T]` (Pydantic <-> `pn.state.location`) persists a config in the URL
+  in `COMPRESSED_BASE64` (default) or human-readable `PLAIN_KEYS` mode. Opt in
+  per view with `url_sync=True` (and `url_mode=`), or a host URL-syncs one
+  aggregate parent config. See
+  [examples/composed_dashboard.py](examples/composed_dashboard.py) for the
+  multi-view composition + URL-sync pattern.
+
+![Composed dashboards](docs/screenshot_composed.png)
+
+*Two views composed under one aggregate config, URL-synced in PLAIN_KEYS mode
+(readable `?app.reactor...` params in the address bar).*
+
 ## Server-side downsampling
 
 Large time series are downsampled on the server so the plot only transports the
-points the current zoom level can show. This is driven by `PlotConfig.downsample`:
+points the current zoom level can show. This is driven by
+`PlotControlsConfig.downsample`:
 
 ```python
-from opensemantic.base.view._config import DashboardConfig, PlotConfig, DownsampleConfig
+from opensemantic.base.view import (
+    DataToolViewConfig,
+    DataToolPlotControlsConfig,
+    DownsampleConfig,
+)
 
-config = DashboardConfig(
-    plot=PlotConfig(
+config = DataToolViewConfig(
+    plot=DataToolPlotControlsConfig(
         downsample=DownsampleConfig(
             enabled=True,      # downsample when the backend supports it
             max_points=2000,   # target points per channel
@@ -320,15 +357,14 @@ plots; the merged Heating entries resolve to probe A for Sample 1 and probe B fo
 Sample 2 (drop-in replacements compared across objects).*
 
 ```python
-from opensemantic.base.view import ProcessObjectView
-from opensemantic.base.view._config import DashboardConfig
+from opensemantic.base.view import ProcessObjectView, ProcessObjectViewConfig
 
 view = ProcessObjectView(
     objects=objects,        # list[Item]
     processes=processes,    # list[Process] (filtered to those with start+end
                             # time and >=1 DataTool whose data you can load)
     controllers=controllers,  # list[DataToolController], matched to process tools
-    config=DashboardConfig(lang="en"),
+    config=ProcessObjectViewConfig(lang="en"),
     title="Process / Object Archive View",
 )
 view.servable()  # for panel serve
