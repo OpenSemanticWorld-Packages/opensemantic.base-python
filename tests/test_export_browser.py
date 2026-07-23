@@ -179,32 +179,38 @@ def server():
 
 
 @pytest.fixture(scope="module")
-def page(server):
+def browser(server):
     try:
         with sync_playwright() as p:
             try:
-                browser = p.chromium.launch(headless=True)
+                b = p.chromium.launch(headless=True)
             except Exception as e:
                 pytest.skip(f"Chromium not available: {e}")
-            context = browser.new_context(
-                viewport={"width": 1400, "height": 900}, accept_downloads=True
-            )
-            pg = context.new_page()
-            pg.goto(server, timeout=30000)
-            pg.wait_for_timeout(6000)
-            # Select "Sensor A" parent (checkbox 0) -> all its channels, incl.
-            # the text "Status" channel. auto_fetch is on, so data loads.
-            _click_checkbox(pg, 0)
-            pg.wait_for_timeout(5000)
-            # Expand the collapsed "Export" card in Plot Controls.
-            header = pg.get_by_text("Export", exact=True).first
-            header.scroll_into_view_if_needed()
-            header.click()
-            pg.wait_for_timeout(1500)
-            yield pg
-            browser.close()
+            yield b
+            b.close()
     except Exception as e:  # pragma: no cover - environment guard
         pytest.skip(f"Playwright session failed: {e}")
+
+
+@pytest.fixture(scope="module")
+def page(browser):
+    context = browser.new_context(
+        viewport={"width": 1400, "height": 900}, accept_downloads=True
+    )
+    pg = context.new_page()
+    pg.goto(URL, timeout=30000)
+    pg.wait_for_timeout(6000)
+    # Select "Sensor A" parent (checkbox 0) -> all its channels, incl. the text
+    # "Status" channel. auto_fetch is on, so data loads.
+    _click_checkbox(pg, 0)
+    pg.wait_for_timeout(5000)
+    # Expand the collapsed "Export" card in Plot Controls.
+    header = pg.get_by_text("Export", exact=True).first
+    header.scroll_into_view_if_needed()
+    header.click()
+    pg.wait_for_timeout(1500)
+    yield pg
+    context.close()
 
 
 def test_download_csv_has_units_and_text_channel(page):
@@ -256,3 +262,33 @@ def test_download_plot_html(page):
         assert viewer.evaluate(_CANVAS_W_JS) > 200
     finally:
         viewer.close()
+
+
+def test_url_sync_writes_and_restores_selection(browser):
+    """End-to-end URL sync (the demo runs with url_sync=True, compressed mode).
+
+    UI -> URL: selecting channels writes the config to the URL. URL -> UI:
+    loading a fresh page at that URL restores the selection - and since the demo
+    auto-fetches, the restored selection renders a plot with no user action.
+    """
+    ctx = browser.new_context(viewport={"width": 1400, "height": 900})
+    try:
+        # UI -> URL
+        pg = ctx.new_page()
+        pg.goto(URL, timeout=30000)
+        pg.wait_for_timeout(6000)
+        # Sanity: nothing plotted before a selection is made.
+        assert pg.evaluate(_CANVAS_W_JS) == 0
+        _click_checkbox(pg, 0)  # select Sensor A (+ children)
+        pg.wait_for_timeout(5000)
+        synced_url = pg.url
+        assert "config=" in synced_url, f"URL not synced: {synced_url}"
+
+        # URL -> UI: a fresh page at the synced URL restores the selection, and
+        # auto-fetch then renders the plot without any interaction.
+        pg2 = ctx.new_page()
+        pg2.goto(synced_url, timeout=30000)
+        pg2.wait_for_timeout(9000)
+        assert pg2.evaluate(_CANVAS_W_JS) > 200, "state not restored from URL"
+    finally:
+        ctx.close()

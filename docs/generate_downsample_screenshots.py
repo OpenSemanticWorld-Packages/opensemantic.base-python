@@ -32,8 +32,8 @@ import datetime as dt
 import os
 
 import imageio.v3 as iio
+from _screenshot_utils import capture_with_address_bar as capture
 from _screenshot_utils import (
-    capture,
     click_tree_checkbox,
     start_server,
     stop_server,

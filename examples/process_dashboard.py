@@ -61,8 +61,12 @@ from opensemantic.base.v1 import (
     DataToolController,
     Process,
 )
-from opensemantic.base.view import ProcessObjectView
-from opensemantic.base.view._config import DashboardConfig, PlotConfig
+from opensemantic.base.view import (
+    PlotControlsConfig,
+    ProcessObjectView,
+    ProcessObjectViewConfig,
+    UrlConfigMode,
+)
 from opensemantic.characteristics.quantitative.v1 import (
     ForcePerAreaUnit,
     Pressure,
@@ -215,13 +219,19 @@ processes = [
 
 # -- Launch ------------------------------------------------------------------
 
-config = DashboardConfig(lang="en", plot=PlotConfig(auto_fetch=True, row_limit=10000))
+config = ProcessObjectViewConfig(
+    lang="en", plot=PlotControlsConfig(auto_fetch=True, row_limit=10000)
+)
 
+# URL-persist the state in COMPRESSED_BASE64 mode (shortest, opaque param).
+# A single URL config uses one mode - modes are never mixed in one param.
 view = ProcessObjectView(
     objects=objects,
     processes=processes,
     controllers=controllers,
     config=config,
+    url_sync=True,
+    url_mode=UrlConfigMode.COMPRESSED_BASE64,
     title="Process / Object Archive View",
 )
 

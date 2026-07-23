@@ -17,6 +17,9 @@ import time
 import imageio.v3 as iio
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _screenshot_utils import _address_bar  # noqa: E402
+
 DOCS_DIR = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_DIR = os.path.dirname(DOCS_DIR)
 EXAMPLE = os.path.join(PACKAGE_DIR, "examples", "datatool_dashboard.py")
@@ -92,10 +95,17 @@ def switch_temperature_unit(page):
 
 
 def capture(page, frames, delay=500):
-    """Capture a screenshot frame."""
+    """Capture a frame with a synthetic address bar (the demo is url_sync=True,
+    so the URL visibly carries the selection/units/time state)."""
+    import numpy as np
+
     page.wait_for_timeout(delay)
-    buf = page.screenshot()
-    frames.append(iio.imread(io.BytesIO(buf)))
+    shot = iio.imread(io.BytesIO(page.screenshot()))
+    bar = _address_bar(page.url, shot.shape[1])
+    if shot.shape[2] == 4:
+        alpha = np.full(bar.shape[:2] + (1,), 255, dtype=bar.dtype)
+        bar = np.concatenate([bar, alpha], axis=2)
+    frames.append(np.vstack([bar, shot]))
 
 
 def start_server():
@@ -120,10 +130,15 @@ def start_server():
 
 
 def stop_server(proc):
-    """Stop the Panel server subprocess."""
-    proc.terminate()
+    """Stop the Panel server subprocess (kill the tree on Windows)."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True
+        )
+    else:
+        proc.terminate()
     try:
-        proc.wait(timeout=5)
+        proc.wait(timeout=8)
     except subprocess.TimeoutExpired:
         proc.kill()
 

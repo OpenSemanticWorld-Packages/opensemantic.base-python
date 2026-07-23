@@ -47,8 +47,13 @@ from opensemantic.base.v1 import (
     DataToolController,
     PostgrestTimeSeriesDatabaseController,
 )
-from opensemantic.base.view import DataToolView
-from opensemantic.base.view._config import DashboardConfig, DownsampleConfig, PlotConfig
+from opensemantic.base.view import (
+    DataToolPlotControlsConfig,
+    DataToolView,
+    DataToolViewConfig,
+    DownsampleConfig,
+    UrlConfigMode,
+)
 from opensemantic.characteristics.quantitative.v1 import Characteristic
 from opensemantic.core.v1 import Label
 
@@ -255,9 +260,9 @@ async def _seed_if_needed(ctrl):
 controller = _build_controller()
 controller.archive_database = _make_db()
 
-config = DashboardConfig(
+config = DataToolViewConfig(
     lang="en",
-    plot=PlotConfig(
+    plot=DataToolPlotControlsConfig(
         auto_fetch=True,
         row_limit=N_POINTS,
         downsample=DownsampleConfig(enabled=True, max_points=MAX_POINTS),
@@ -267,6 +272,8 @@ config = DashboardConfig(
 view = DownsampleDemoView(
     controllers=[controller],
     config=config,
+    url_sync=True,
+    url_mode=UrlConfigMode.JSON,  # readable JSON in the URL
     title="Downsampling Demo (raw / sample / average / minmax)",
 )
 # One plot per characteristic (channel). The plots stack at full height and the

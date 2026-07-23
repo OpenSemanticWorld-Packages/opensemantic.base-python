@@ -2,9 +2,8 @@
 
 Provides a Panelini-based view with:
 - Wunderbaum TreeGrid sidebar showing DataTools and their channels
-- Plotly time series plot for selected (checked) channels
+- Bokeh time series plot for selected (checked) channels
 - Time range selection and unit switching controls
-- JsonEditor for runtime config editing
 
 Usage:
     from opensemantic.base.view import DataToolView
@@ -29,6 +28,7 @@ from bokeh.models import (
 from bokeh.plotting import figure as bk_figure
 from panelini import Panelini
 from panelini.panels.wunderbaum import Wunderbaum
+from pydantic import ConfigDict, Field
 
 from opensemantic.base.view._base_view import COLORS, BaseDataView
 from opensemantic.base.view._channel_utils import (
@@ -37,20 +37,62 @@ from opensemantic.base.view._channel_utils import (
     flatten_composite_channels,
     get_display_label,
     get_selected_channels,
+    get_unit_enum_from_value,
     group_channels_by_characteristic,
     resolve_downsample_method,
     resolve_value_type,
 )
-from opensemantic.base.view._config import DashboardConfig
+from opensemantic.base.view._config import (
+    BaseViewConfig,
+    PlotControlsConfig,
+    TimeRange,
+    TreeConfig,
+)
 from opensemantic.base.view._data_cache import ChannelDataCache
 
 
-def get_unit_enum_from_value(value: Any) -> Any:
-    """Get the UnitEnum type from a typed value instance."""
-    unit = getattr(value, "unit", None)
-    if unit is not None:
-        return type(unit) if hasattr(type(unit), "__members__") else None
-    return None
+class DataToolPlotControlsConfig(PlotControlsConfig):
+    """Plot controls for the channel-centered view - adds an absolute window."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "DataToolPlotControlsConfig",
+            "defaultProperties": [
+                "grouping",
+                "auto_fetch",
+                "row_limit",
+                "cache_enabled",
+                "downsample",
+                "unit_selections",
+                "time_range",
+            ],
+        }
+    )
+
+    time_range: Optional[TimeRange] = Field(
+        None, title="Time range", json_schema_extra={"title*": {"de": "Zeitbereich"}}
+    )
+
+
+class DataToolViewConfig(BaseViewConfig):
+    """Config for :class:`DataToolView` (channel-centered).
+
+    Composes one channel ``tree`` and a plot-controls config with a
+    ``time_range``. ``tree.source`` carries the checked-channel selection in
+    Wunderbaum's native format.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "DataToolViewConfig",
+            "defaultProperties": ["controllers", "lang", "tree", "plot"],
+        }
+    )
+
+    tree: TreeConfig = Field(default_factory=TreeConfig, title="Channel tree")
+    plot: DataToolPlotControlsConfig = Field(
+        default_factory=DataToolPlotControlsConfig, title="Plot controls"
+    )
 
 
 _logger = logging.getLogger(__name__)
@@ -81,15 +123,24 @@ class DataToolView(BaseDataView):
         Dashboard title shown in the Panelini header.
     """
 
+    config_cls = DataToolViewConfig
+
     def __init__(
         self,
         controllers: Optional[List[Any]] = None,
-        config: Optional[DashboardConfig] = None,
+        config: Optional[BaseViewConfig] = None,
         title: str = "DataTool Dashboard",
         embeddable: bool = False,
+        url_sync: bool = False,
+        url_mode=None,
     ):
         self._controllers = controllers or []
-        self._config = config or DashboardConfig()
+        self._config = type(self)._coerce_config(config)
+        # The concrete config class is the single source of truth for
+        # validation / round-tripping (a subclass such as LiveDataToolViewConfig).
+        self._config_cls = type(self._config)
+        self._url_sync = url_sync
+        self._url_mode = url_mode
         self._title = title
         # When embeddable, skip building the internal Panelini app so the cards
         # can be placed into a host app via sidebar_cards / main_cards (Panel
@@ -104,7 +155,7 @@ class DataToolView(BaseDataView):
         # State
         self._selected: List[Tuple[Any, Any]] = []
         self._groups: Dict[str, List[Tuple[Any, Any]]] = {}
-        self._unit_selections: Dict[str, str] = {}
+        self._unit_selections: Dict[str, str] = dict(self._config.plot.unit_selections)
         self._cached_data: Dict[str, List] = {}
         self._composite_parents: Dict[str, Tuple[Any, str]] = {}
 
@@ -129,8 +180,13 @@ class DataToolView(BaseDataView):
         self._build_controls()
         self._build_plot()
         self._build_log_console()
-        self._build_config_editor()
         self._build_layout()
+
+        # Reflect any pre-set state (selection / time / units) from the config,
+        # then optionally bind the config to the URL.
+        self._apply_initial_config()
+        if self._url_sync:
+            self._enable_url_sync(mode=self._url_mode)
 
     def _build_lookup_maps(self):
         for ctrl in self._controllers:
@@ -165,15 +221,28 @@ class DataToolView(BaseDataView):
 
     def _on_source_change(self, *args):
         """Handle tree source changes (checkbox toggling)."""
+        if getattr(self, "_applying_config", False):
+            return
         try:
             # A selection change loads the full picker window, not a zoom slice.
             self._zoom_window = None
             self._update_selection()
             self._update_unit_controls()
+            self._write_selection_to_config()
             if self._config.plot.auto_fetch:
                 self._trigger_load()
+            self._emit_config_change()
         except Exception as e:
             _logger.error("Error in _on_source_change: %s", e)
+
+    def _write_selection_to_config(self):
+        """Mirror the checked channel keys into ``config.tree.selected``."""
+        self._config.tree.selected = [
+            child.get("key")
+            for root in self._tree.source
+            for child in root.get("children", [])
+            if child.get("selected")
+        ]
 
     def _update_selection(self):
         raw_selected = get_selected_channels(self._tree.source, self._controllers)
@@ -249,60 +318,104 @@ class DataToolView(BaseDataView):
             self._load_button,
             self._load_range_button,
             self._auto_fetch_cb,
+            self._build_grouping_control(),
             self._row_limit_input,
+            self._build_cache_control(),
             self._clear_cache_button,
+            self._build_downsample_controls(),
             self._unit_controls,
             self._build_export_toolbar(),
             title=_t("plot_controls", self.lang),
         )
 
+    def _regroup(self):
+        self._update_selection()
+
+    def _has_active_selection(self) -> bool:
+        return bool(self._selected)
+
     def _on_load_click(self, event):
         self._trigger_load()
 
     def _on_time_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
         # A manual time-range edit overrides any active zoom slice.
         self._zoom_window = None
+        self._write_time_range_to_config()
         if self._config.plot.auto_fetch and self._selected:
             self._trigger_load()
+        self._emit_config_change()
+
+    def _write_time_range_to_config(self):
+        """Mirror the pickers (naive local) into ``config.plot.time_range``."""
+        self._config.plot.time_range = TimeRange(
+            start=self._start_picker.value, end=self._end_picker.value
+        )
 
     def _on_auto_fetch_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
         self._config.plot.auto_fetch = event.new
+        self._emit_config_change()
 
     def _on_row_limit_change(self, event):
+        if getattr(self, "_applying_config", False):
+            return
         self._config.plot.row_limit = event.new
+        self._emit_config_change()
 
     def _on_clear_cache(self, event):
         self._cache.clear_cache()
         self._cached_data.clear()
 
-    # -- Config editor change handler (view-specific) --
+    # -- Config apply (config -> view); base handles the JsonEditor wiring --
 
-    def _on_config_editor_change(self, event):
-        if not event.new or not isinstance(event.new, dict):
-            return
-        try:
-            new_config = DashboardConfig.model_validate(event.new)
-        except Exception as e:
-            _logger.debug("Incomplete config value, skipping: %s", e)
-            return
-        if new_config is None:
-            return
-        old_config = self._config
-        self._config = new_config
-
-        # Determine what changed and rebuild accordingly
-        if old_config.controllers != new_config.controllers:
+    def _apply_config(self, old, new):
+        """Apply a config to the widgets/state (see BaseDataView.set_config)."""
+        super()._apply_config(old, new)  # units + plot-control widgets
+        if old is None or old.controllers != getattr(new, "controllers", []):
             self._on_controllers_changed()
-        if old_config.plot.grouping != new_config.plot.grouping:
-            self._update_selection()
-            self._update_unit_controls()
-            self._refresh_plot()
-        if old_config.plot.cache_enabled != new_config.plot.cache_enabled:
-            self._cache.enabled = new_config.plot.cache_enabled
-        if old_config.lang != new_config.lang:
+        if old is None or old.lang != new.lang:
             self._rebuild_ui_labels()
-        self._auto_fetch_cb.value = new_config.plot.auto_fetch
-        self._row_limit_input.value = new_config.plot.row_limit
+        self._apply_selection(new)
+        self._apply_time_range(new)
+        # Rebuild grouping/units from the applied selection, then (re)plot.
+        self._update_selection()
+        self._update_unit_controls()
+        self._refresh_plot()
+        if new.plot.auto_fetch and self._selected:
+            self._trigger_load()
+
+    def _apply_selection(self, config):
+        """Rebuild the tree from the data with the config's channels checked."""
+        keys = set(config.tree.selected or [])
+        source = build_tree_source(self._controllers, self.lang)
+        for root in source:
+            for child in root.get("children", []):
+                child["selected"] = child.get("key") in keys
+        self._tree.set_source(source)
+
+    def _config_has_state(self, config):
+        return (
+            bool(config.tree.selected)
+            or bool(config.plot.unit_selections)
+            or bool(config.plot.time_range)
+        )
+
+    def _apply_time_range(self, config):
+        """Apply the config's time range to the pickers (verbatim if naive)."""
+        tr = getattr(config.plot, "time_range", None)
+        if not tr:
+            return
+        if tr.start is not None:
+            self._start_picker.value = (
+                tr.start if tr.start.tzinfo is None else self._to_picker_value(tr.start)
+            )
+        if tr.end is not None:
+            self._end_picker.value = (
+                tr.end if tr.end.tzinfo is None else self._to_picker_value(tr.end)
+            )
 
     def _on_controllers_changed(self):
         """Handle controllers list change from config editor.
@@ -323,7 +436,6 @@ class DataToolView(BaseDataView):
         self._controls_card.title = _t("plot_controls", self.lang)
         self._plot_card.title = _t("time_series", self.lang)
         self._log_card.title = _t("log_console", self.lang)
-        self._config_card.title = _t("config", self.lang)
         self._load_button.name = _t("load_data", self.lang)
         self._auto_fetch_cb.name = _t("auto_fetch", self.lang)
         self._row_limit_input.name = _t("row_limit", self.lang)
@@ -783,7 +895,6 @@ class DataToolView(BaseDataView):
             [
                 self._tree_card,
                 self._controls_card,
-                self._config_card,
             ]
         )
         self._build_main_area()
@@ -794,8 +905,8 @@ class DataToolView(BaseDataView):
 
     @property
     def sidebar_cards(self):
-        """Sidebar cards (channel tree, plot controls, config) for embedding."""
-        return [self._tree_card, self._controls_card, self._config_card]
+        """Sidebar cards (channel tree, plot controls) for embedding."""
+        return [self._tree_card, self._controls_card]
 
     @property
     def main_cards(self):

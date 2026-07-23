@@ -1,7 +1,26 @@
-"""Configuration models for the DataTool dashboard UI."""
+"""Base and shared component configuration for the archive-view dashboards.
 
+The config mirrors the panel composition: each UI component owns a config class
+(``TreeConfig``, ``PlotControlsConfig``, ``DownsampleConfig``), each view owns a
+``BaseViewConfig`` subclass that composes the component configs it shows, and a
+host that renders several views composes their configs into an aggregate parent
+model. Creating a new dashboard therefore means: subclass ``BaseDataView`` (the
+view) and ``BaseViewConfig`` (its config, defined next to the view), and provide
+the config->view ``_apply_config`` hook.
+
+Only the base and the configs shared across views live here; each concrete
+view's config lives in the view's own module (e.g. ``DataToolViewConfig`` in
+``_datatool_dashboard``).
+
+The tree components reuse Wunderbaum's own JSON serialization (its ``source``
+list of node dicts, which already carries the ``selected`` state) rather than a
+parallel selection model - ``TreeConfig.source`` is exactly what
+``Wunderbaum.get_source()`` / ``set_source()`` round-trip.
+"""
+
+from datetime import datetime
 from enum import Enum
-from typing import List
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,6 +43,30 @@ class DownsampleMethod(str, Enum):
     MINMAX = "minmax"
 
 
+# -- Value objects ----------------------------------------------------------
+
+
+class TimeRange(BaseModel):
+    """Explicit plot time window. Naive datetimes are treated as UTC."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "TimeRange",
+            "defaultProperties": ["start", "end"],
+        }
+    )
+
+    start: Optional[datetime] = Field(
+        None, title="Start", json_schema_extra={"title*": {"de": "Start"}}
+    )
+    end: Optional[datetime] = Field(
+        None, title="End", json_schema_extra={"title*": {"de": "Ende"}}
+    )
+
+
+# -- Component configs (one per UI component) -------------------------------
+
+
 class DownsampleConfig(BaseModel):
     """Server-side downsampling configuration.
 
@@ -35,6 +78,7 @@ class DownsampleConfig(BaseModel):
     """
 
     model_config = ConfigDict(
+        extra="allow",
         json_schema_extra={
             "title": "DownsampleConfig",
             "defaultProperties": [
@@ -43,7 +87,7 @@ class DownsampleConfig(BaseModel):
                 "method",
                 "edge_anchors",
             ],
-        }
+        },
     )
 
     enabled: bool = Field(
@@ -80,27 +124,47 @@ class DownsampleConfig(BaseModel):
 
 
 class TreeConfig(BaseModel):
-    """Wunderbaum TreeGrid configuration."""
+    """Config of a Wunderbaum tree component - its selection state.
+
+    Stores only the ``selected`` node keys, not the full native source: the tree
+    structure is rebuilt deterministically from the current data (controllers /
+    objects), so the persisted state is just which keys are checked. This keeps
+    the config compact and human-readable (a list of uuids) instead of dumping
+    every node's title/tooltip/data, which would bloat a URL-synced config.
+    """
 
     model_config = ConfigDict(
-        json_schema_extra={"title": "TreeConfig", "defaultProperties": []}
+        extra="allow",
+        json_schema_extra={
+            "title": "TreeConfig",
+            "defaultProperties": ["selected"],
+        },
+    )
+
+    selected: List[str] = Field(
+        default_factory=list,
+        title="Selected keys",
+        description="Keys of the checked tree nodes",
+        json_schema_extra={"title*": {"de": "Ausgewaehlte Schluessel"}},
     )
 
 
-class PlotConfig(BaseModel):
-    """Time series plot configuration."""
+class PlotControlsConfig(BaseModel):
+    """Config of the Plot Controls component (and the plot it drives)."""
 
     model_config = ConfigDict(
+        extra="allow",
         json_schema_extra={
-            "title": "PlotConfig",
+            "title": "PlotControlsConfig",
             "defaultProperties": [
                 "grouping",
                 "auto_fetch",
                 "row_limit",
                 "cache_enabled",
                 "downsample",
+                "unit_selections",
             ],
-        }
+        },
     )
 
     grouping: GroupingMode = Field(
@@ -138,50 +202,35 @@ class PlotConfig(BaseModel):
         title="Downsample",
         json_schema_extra={"title*": {"de": "Downsampling"}},
     )
+    unit_selections: Dict[str, str] = Field(
+        default_factory=dict,
+        title="Unit selections",
+        description="Selected display unit per characteristic group",
+        json_schema_extra={"title*": {"de": "Einheitenauswahl"}},
+    )
 
 
-class LiveConfig(BaseModel):
-    """Live subscription configuration."""
+# -- Base view config -------------------------------------------------------
+
+
+class BaseViewConfig(BaseModel):
+    """Base view configuration - the complete, JSON-serializable state common
+    to every archive view.
+
+    A view owns its config class: each concrete view pairs a ``BaseDataView``
+    subclass with its own ``BaseViewConfig`` subclass (defined in the view's
+    module). ``extra="allow"`` lets a subclass (or an unknown future field)
+    survive a ``model_dump()`` / ``model_validate()`` round-trip, and
+    ``validate_assignment`` keeps field mutation valid (needed for URL binding).
+    """
 
     model_config = ConfigDict(
+        extra="allow",
+        validate_assignment=True,
         json_schema_extra={
-            "title": "LiveConfig",
-            "defaultProperties": [
-                "buffer_size",
-                "update_interval_ms",
-                "history_seconds",
-            ],
-        }
-    )
-
-    buffer_size: int = Field(
-        1000,
-        title="Buffer size",
-        ge=10,
-        json_schema_extra={"title*": {"de": "Puffergroesse"}},
-    )
-    update_interval_ms: int = Field(
-        500,
-        title="Update interval (ms)",
-        ge=50,
-        json_schema_extra={"title*": {"de": "Aktualisierungsintervall (ms)"}},
-    )
-    history_seconds: float = Field(
-        10.0,
-        title="History window (s)",
-        gt=0,
-        json_schema_extra={"title*": {"de": "Verlaufsfenster (s)"}},
-    )
-
-
-class DashboardConfig(BaseModel):
-    """Root dashboard configuration."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "DashboardConfig",
-            "defaultProperties": ["controllers", "lang", "tree", "plot"],
-        }
+            "title": "BaseViewConfig",
+            "defaultProperties": ["controllers", "lang", "plot"],
+        },
     )
 
     controllers: List[str] = Field(
@@ -198,18 +247,6 @@ class DashboardConfig(BaseModel):
         title="Language",
         json_schema_extra={"title*": {"de": "Sprache"}},
     )
-    tree: TreeConfig = Field(default_factory=TreeConfig, title="Tree")
-    plot: PlotConfig = Field(default_factory=PlotConfig, title="Plot")
-
-
-class LiveDashboardConfig(DashboardConfig):
-    """Dashboard configuration with live subscription support."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "LiveDashboardConfig",
-            "defaultProperties": ["controllers", "lang", "tree", "plot", "live"],
-        }
+    plot: PlotControlsConfig = Field(
+        default_factory=PlotControlsConfig, title="Plot controls"
     )
-
-    live: LiveConfig = Field(default_factory=LiveConfig, title="Live")
