@@ -154,6 +154,23 @@ See [examples/datatool_dashboard.py](examples/datatool_dashboard.py) for a full 
 
 To regenerate the screenshots after UI changes, see [docs/generate_screenshots.py](docs/generate_screenshots.py).
 
+### Export
+
+A toolbar at the top of the plot card exports the currently plotted data and
+plot (requires the `export` extra):
+
+- **Download CSV / XLSX** - a unit-aware [pint-pandas](https://github.com/hgrecco/pint-pandas)
+  table (one column per series, its unit written in a dedicated header row via
+  `dequantify()`), matching exactly what is plotted (unit conversion +
+  normalization). Rows are capped at `EXPORT_MAX_ROWS` (default 1,000,000) via
+  uniform downsampling.
+- **Download plot (HTML)** - a standalone interactive Bokeh document
+  (`bokeh.embed.file_html`). PNG is available from the Bokeh toolbar's save tool.
+
+The rendered figures are exposed via `view.figures` so a host app can add its
+own annotations; `view.export_series()` returns the plotted series as tidy
+records.
+
 ## Server-side downsampling
 
 Large time series are downsampled on the server so the plot only transports the
@@ -332,6 +349,21 @@ regenerate these screenshots.
 pip install opensemantic.base            # models only
 pip install opensemantic.base[controller] # + aiosqlite, postgrest
 pip install opensemantic.base[view]       # + panel, bokeh, panelini, pint
+pip install opensemantic.base[export]     # + pandas, pint-pandas, openpyxl (data/plot export)
+```
+
+### Running the examples
+
+```bash
+git clone https://github.com/OpenSemanticWorld-Packages/opensemantic.base-python.git
+cd opensemantic.base-python
+pip install -e .
+pip install opensemantic.base[controller] opensemantic.base[view] opensemantic.base[export]
+pip install opensemantic.characteristics.quantitative   # typed characteristics
+pip install nest-asyncio                                 # examples/datatool_dashboard.py
+pip install PyJWT                                        # examples/downsample_demo.py (needs a database)
+
+panel serve examples/datatool_dashboard.py --dev
 ```
 
 ## Testing

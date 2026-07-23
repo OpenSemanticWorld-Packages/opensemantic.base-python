@@ -252,6 +252,7 @@ class DataToolView(BaseDataView):
             self._row_limit_input,
             self._clear_cache_button,
             self._unit_controls,
+            self._build_export_toolbar(),
             title=_t("plot_controls", self.lang),
         )
 
@@ -412,10 +413,13 @@ class DataToolView(BaseDataView):
         method = resolve_downsample_method(channel, ds.method.value)
         return ds.max_points, method, ds.edge_anchors
 
-    def _build_figure(self):
-        """Build Bokeh figures - one per characteristic group."""
-        self._plot_col.clear()
+    def _make_figures(self):
+        """Build a fresh list of Bokeh figures (one per group) from the cache.
 
+        Returns ``(figs, shared_x_range)``. The figures are not attached to any
+        pane/document, so this is reused both for live rendering and for a
+        detached copy for HTML export (a model may live in only one document).
+        """
         plot_groups = []
         for group_key, channels in self._groups.items():
             if not channels:
@@ -427,7 +431,7 @@ class DataToolView(BaseDataView):
             plot_groups.append((group_key, channels, vtype))
 
         if not plot_groups:
-            return
+            return [], None
 
         # One shared x-range for every figure, so panning, zooming or resetting
         # any plot moves all of them together (the y-ranges stay independent).
@@ -481,6 +485,15 @@ class DataToolView(BaseDataView):
 
             fig.legend.click_policy = "hide"
             figs.append(fig)
+        return figs, shared_x
+
+    def _build_figure(self):
+        """Build Bokeh figures - one per characteristic group."""
+        self._plot_col.clear()
+        figs, shared_x = self._make_figures()
+        self._figures = figs
+        if not figs:
+            return
 
         # Keep the shared range for "Load current range" and bridge the Reset
         # event: figure.on_event(Reset) does not propagate through Panel's Bokeh
@@ -498,6 +511,11 @@ class DataToolView(BaseDataView):
 
         for fig in figs:
             self._plot_col.append(pn.pane.Bokeh(fig, sizing_mode="stretch_width"))
+
+    def _export_figures(self):
+        """Fresh, unattached figures for HTML export (see _make_figures)."""
+        figs, _ = self._make_figures()
+        return figs
 
     def _current_xrange_window(self):
         """Return (start, end) *naive* datetimes of the current plot x-range.
@@ -637,6 +655,73 @@ class DataToolView(BaseDataView):
                 values.append(sub)
 
         return timestamps, values
+
+    # -- Export --
+
+    def _representative_value(self, ch: Any) -> Any:
+        """A typed (Characteristic) value from the channel's cache, or None."""
+        if ch.uuid in self._composite_parents:
+            parent_ch, field_name = self._composite_parents[ch.uuid]
+            for pt in self._cached_data.get(parent_ch.uuid, []):
+                val = pt.value
+                sub = (
+                    val.get(field_name)
+                    if isinstance(val, dict)
+                    else getattr(val, field_name, None)
+                )
+                if sub is not None and hasattr(sub, "to_pint"):
+                    return sub
+            return None
+        for pt in self._cached_data.get(ch.uuid, []):
+            if hasattr(pt.value, "to_pint"):
+                return pt.value
+        return None
+
+    def _series_unit(self, ch: Any, group_key: str) -> str:
+        """Pint-parseable unit string of the plotted (display-unit) values."""
+        return self._pint_unit(
+            self._representative_value(ch), self._unit_selections.get(group_key)
+        )
+
+    def export_series(self) -> List[dict]:
+        """Every checked channel as tidy records (datetime x).
+
+        Numeric channels carry their display unit and match _build_figure's
+        traces; text-log channels (a different display group) are included too,
+        with ``unit=None`` so they export as plain text columns.
+        """
+        records: List[dict] = []
+        for group_key, channels in self._groups.items():
+            if not channels:
+                continue
+            is_text = resolve_value_type(channels[0][1]) == "text"
+            for ctrl, ch in channels:
+                x, y = self._extract_trace_data(ch, group_key)
+                if not x:
+                    continue
+                # Composite sub-fields share the parent channel label, so add
+                # the sub-field name to keep one column per series.
+                if ch.uuid in self._composite_parents:
+                    parent_ch, field_name = self._composite_parents[ch.uuid]
+                    label = (
+                        f"{get_display_label(ctrl, self.lang)}/"
+                        f"{get_display_label(parent_ch, self.lang)}/{field_name}"
+                    )
+                else:
+                    label = (
+                        f"{get_display_label(ctrl, self.lang)}/"
+                        f"{get_display_label(ch, self.lang)}"
+                    )
+                records.append(
+                    {
+                        "label": label,
+                        "x": x,
+                        "y": y,
+                        "x_kind": "datetime",
+                        "unit": None if is_text else self._series_unit(ch, group_key),
+                    }
+                )
+        return records
 
     def _update_log_console(self):
         """Update the log console with text-type channel data."""

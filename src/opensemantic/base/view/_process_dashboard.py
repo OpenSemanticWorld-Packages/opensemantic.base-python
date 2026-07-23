@@ -260,6 +260,7 @@ class ProcessObjectView(BaseDataView):
             self._row_limit_input,
             self._clear_cache_button,
             self._unit_controls,
+            self._build_export_toolbar(),
             title=_t("plot_controls", self.lang),
         )
 
@@ -360,9 +361,13 @@ class ProcessObjectView(BaseDataView):
 
         self._refresh_plot()
 
-    def _build_figure(self):
-        self._plot_col.clear()
+    def _make_figures(self) -> List[Any]:
+        """Build a fresh list of Bokeh figures (one per group) from the traces.
 
+        The figures are not attached to any pane/document, so this is reused
+        both for live rendering and for a detached copy for HTML export (a model
+        may live in only one document).
+        """
         # Group traces by y-axis group, skipping text channels.
         plot_groups: Dict[str, List[Dict[str, Any]]] = {}
         for tr in self._traces:
@@ -375,8 +380,9 @@ class ProcessObjectView(BaseDataView):
             plot_groups.setdefault(gkey, []).append(tr)
 
         if not plot_groups:
-            return
+            return []
 
+        figs: List[Any] = []
         color_idx = 0
         for gkey, traces in plot_groups.items():
             axis_label = self._get_axis_label(gkey)
@@ -395,11 +401,7 @@ class ProcessObjectView(BaseDataView):
                 # of the same type). Label each line distinctly by
                 # object · process / datatool / channel so Bokeh keeps them as
                 # separate, individually-toggleable legend entries.
-                label = (
-                    f"{tr['object_label']} · {tr['process_label']} / "
-                    f"{get_display_label(tr['controller'], self.lang)} / "
-                    f"{get_display_label(tr['channel'], self.lang)}"
-                )
+                label = self._trace_label(tr)
                 src = ColumnDataSource(data={"x": xs, "y": ys})
                 fig.line(
                     "x",
@@ -412,7 +414,53 @@ class ProcessObjectView(BaseDataView):
                 color_idx += 1
             fig.legend.click_policy = "hide"
             fig.legend.label_text_font_size = "8pt"
+            figs.append(fig)
+        return figs
+
+    def _build_figure(self):
+        self._plot_col.clear()
+        self._figures = self._make_figures()
+        for fig in self._figures:
             self._plot_col.append(pn.pane.Bokeh(fig, sizing_mode="stretch_width"))
+
+    def _export_figures(self) -> List[Any]:
+        """Fresh, unattached figures for HTML export (see _make_figures)."""
+        return self._make_figures()
+
+    def _trace_label(self, tr: Dict[str, Any]) -> str:
+        return (
+            f"{tr['object_label']} · {tr['process_label']} / "
+            f"{get_display_label(tr['controller'], self.lang)} / "
+            f"{get_display_label(tr['channel'], self.lang)}"
+        )
+
+    def export_series(self) -> List[Dict[str, Any]]:
+        """Plotted traces as tidy records (relative-seconds x)."""
+        records: List[Dict[str, Any]] = []
+        for tr in self._traces:
+            ch = tr["channel"]
+            if resolve_value_type(ch) == "text":
+                continue
+            gkey = self._group_of.get(ch.uuid)
+            if gkey is None:
+                continue
+            xs, ys = self._extract_trace(tr, gkey)
+            if not xs:
+                continue
+            rep = next(
+                (p.value for p in tr["points"] if hasattr(p.value, "to_pint")),
+                None,
+            )
+            records.append(
+                {
+                    "label": self._trace_label(tr),
+                    "x": xs,
+                    "y": ys,
+                    "x_kind": "seconds",
+                    "unit": self._pint_unit(rep, self._unit_selections.get(gkey)),
+                }
+            )
+        return records
 
     def _extract_trace(self, tr: Dict[str, Any], group_key: str) -> Tuple[List, List]:
         """Relative-seconds x and (unit-converted) numeric y for a trace."""
