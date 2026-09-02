@@ -14,6 +14,7 @@ from opensemantic.core import (
     Description,
     Entity,
     Enumeration,
+    File,
     IntangibleItem,
     Item,
     Label,
@@ -1006,167 +1007,44 @@ class Recipe(HowTo):
 #   filename:  OSWfe72974590fd4e8ba94cd4e8366375e8.json
 
 
-class Distribution(OswBaseModel):
+class Status(str, Enum):
+    Item_OSWaa8d29404288446a9f3ec7afa4e2a512 = (
+        "Item:OSWaa8d29404288446a9f3ec7afa4e2a512"
+    )
+    """
+    To do
+    """
+    Item_OSWa2b4567ad4874ea1b9adfed19a3d06d1 = (
+        "Item:OSWa2b4567ad4874ea1b9adfed19a3d06d1"
+    )
+    """
+    In work
+    """
+    Item_OSWf474ec34b7df451ea8356134241aef8a = (
+        "Item:OSWf474ec34b7df451ea8356134241aef8a"
+    )
+    """
+    Done
+    """
+
+
+class DisplayName(OswBaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"title": "Distribution"},
+        json_schema_extra={"title": "Display name", "title*": {"de": "Anzeigenamen"}},
     )
-    download_url: str = Field(..., title="Download URL")
-
-
-class DatasetSchema(Item):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [{"schema_definition": "Property:HasSchemaDefinition"}],
-            "title": "DatasetSchema",
-            "defaultProperties": ["schema_definition", "label", "uuid"],
-        },
-    )
-    schema_definition: str | None = Field(None, title="Dataset schema")
-    """
-    Defintion of a JSON based Schema for a dataset.
-    """
-    type: list[str] | None = ["Category:OSW0d6584b3e2b64e9595733c4c3963c486"]
-
-
-class Dataset(Data):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW2ac4493f8635481eaf1db961b63c8325?action=raw&slot=jsonschema",
-                {
-                    "url": "dcat:landingPage",
-                    "url*": "Property:HasUrl",
-                    "themes": {"@type": "@id", "@id": "dcat:theme"},
-                    "themes*": {"@type": "@id", "@id": "Property:IsRelatedTo"},
-                    "distributions": {"@type": "@id", "@id": "dcat:distribution"},
-                    "distributions*": {
-                        "@type": "@id",
-                        "@id": "Property:HasDistribution",
-                    },
-                    "download_url": "dcat:downloadURL",
-                    "download_url*": "Property:HasUrl",
-                    "data_format": "Property:HasDataFormat",
-                    "dataset_schema": "Property:HasDatasetSchema",
-                },
-            ],
-            "title": "Dataset",
-            "defaultProperties": ["url", "themes"],
-            "uuid": "fe729745-90fd-4e8b-a94c-d4e8366375e8",
-            "title*": {"en": "Dataset"},
-            "description": "",
-            "description*": {},
-        },
-    )
-    type: list[str] | None = ["Category:OSWfe72974590fd4e8ba94cd4e8366375e8"]
-    url: list[str] | None = Field(None, title="URL / Websites")
-    """
-    Landing page(s) that documents the dataset
-    """
-    themes: list[Entity] | None = Field(
-        None, json_schema_extra={"range": "Category:Entity"}, title="Themes / Topics"
-    )
-    """
-    Terms to categorizes this dataset
-    """
-    distributions: list[Distribution] | None = Field(
-        None, title="Distributions / Downloads"
-    )
-    """
-    Actual download options for this dataset
-    """
-    data_format: list[DataFormat] | None = Field(
-        None,
-        json_schema_extra={"range": "Category:OSWccac243b31f94574847861e5d9685b82"},
-        min_length=1,
-        title="Data format",
-    )
-    """
-    Gives a structure to define specific formats of data.
-    """
-    dataset_schema: list[DatasetSchema] | None = Field(
-        None,
-        json_schema_extra={"range": "Category:OSW0d6584b3e2b64e9595733c4c3963c486"},
-        min_length=1,
-        title="Dataset schema",
-    )
-
-
-class DataTerm(DefinedTerm):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSWa5812d3b5119416c8da1606cbe7054eb?action=raw&slot=jsonschema"
-            ],
-            "title": "DataTerm",
-        },
-    )
-    type: list[str] | None = ["Category:OSW34f9d66c7e1241c8b9543231526f126d"]
-
-
-class DataFormat(DataTerm):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "defaultProperties": [
-                "specification",
-                "description",
-                "label",
-                "short_name",
-            ],
-            "title": "DataFormat",
-        },
-    )
-    specification: str | None = Field(
+    text: Any | None = Field(
         None,
         json_schema_extra={
-            "title*": {"de": "Spezifikation"},
-            "description*": {"de": "Entweder Text oder Link"},
-        },
-        title="Specification",
-    )
-    """
-    Either text or link
-    """
-    type: list[str] | None = ["Category:OSWccac243b31f94574847861e5d9685b82"]
-
-
-# generated by datamodel-codegen:
-#   filename:  OSW0d6584b3e2b64e9595733c4c3963c486.json
-
-
-# generated by datamodel-codegen:
-#   filename:  OSWafcac83979f4472298b6acdc01981728.json
-
-
-class DigitalDocument(CreativeWork):
-    """
-    An electronic file or document.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW712583f2479944deb2546b77cf860dda?action=raw&slot=jsonschema"
-            ],
-            "uuid": "afcac839-79f4-4722-98b6-acdc01981728",
-            "title": "DigitalDocument",
-            "title*": {"en": "Digital document"},
-            "description": "An electronic file or document.",
-            "description*": {"en": "An electronic file or document."},
+            "watch": {
+                "first_name": "root.first_name",
+                "middle_name": "root.middle_name",
+                "surname": "root.surname",
+            },
+            "readonly": True,
+            "dynamic_template": "{{first_name}}{{#each middle_name}} {{.}}{{/each}}{{#if surname}} {{{surname}}}{{/if}}",
         },
     )
-    type: list[str] | None = ["Category:OSWafcac83979f4472298b6acdc01981728"]
-
-
-# generated by datamodel-codegen:
-#   filename:  OSW34f9d66c7e1241c8b9543231526f126d.json
-
-
-# generated by datamodel-codegen:
-#   filename:  OSWccac243b31f94574847861e5d9685b82.json
-
-
-# generated by datamodel-codegen:
-#   filename:  OSW3d238d05316e45a4ac95a11d7b24e36b.json
+    lang: str | None = "en"
 
 
 class GPSCoordinates(OswBaseModel):
@@ -1210,6 +1088,411 @@ class GPSCoordinates(OswBaseModel):
     """
     Angular measurement ranging from 0 degree at the Prime Meridian to +180 degree eastward and minus 180 degree westward.
     """
+
+
+class ProjectTypeDeprecated(str, Enum):
+    """
+    Replaced with Project / Funding Type
+    """
+
+    house_project = "house_project"
+    """
+    House project
+    """
+    internal = "internal"
+    """
+    Internal
+    """
+    public = "public"
+    """
+    Public
+    """
+    industry = "industry"
+    """
+    Industry
+    """
+
+
+class WeightedSum(OswBaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "weighted sum",
+            "title*": {"de": "Gewichtete Summe"},
+            "_description": "weighted with probability of successful funding",
+            "_description*": {"de": "gewichtet mit Erfolgswahrscheinlichkeit"},
+            "options": {
+                "disable_collapse": True,
+                "disable_properties": True,
+                "compact": True,
+            },
+        },
+    )
+    uuid: UUID = Field(
+        ..., json_schema_extra={"options": {"hidden": True}}, title="UUID"
+    )
+    quantity: str | None = Field(
+        "Property:HasWeightedBudget", json_schema_extra={"options": {"hidden": True}}
+    )
+    numerical_value: str = Field(
+        ...,
+        json_schema_extra={
+            "_format": "template",
+            "options": {
+                "grid_columns": 12,
+                "hidden": True,
+                "dynamic_template": {"override": "always"},
+            },
+            "watch": {
+                "probability_of_successful_funding": "probability_of_successful_funding.numerical_value",
+                "yearly_budget_sum_value": "yearly_budget.yearly_budget_sum.numerical_value",
+            },
+            "dynamic_template": "{{#calc 0.01 '*'}}{{#calc probability_of_successful_funding '*'}}{{yearly_budget_sum_value}}{{/calc}}{{/calc}}",
+        },
+    )
+    value: str = Field(
+        ...,
+        json_schema_extra={
+            "_format": "template",
+            "options": {"grid_columns": 12, "hidden": False},
+            "_watch": {
+                "probability_of_successful_funding": "probability_of_successful_funding.numerical_value",
+                "yearly_budget_sum_value": "yearly_budget.yearly_budget_sum.numerical_value",
+                "yearly_budget_sum_unit_symbol": "yearly_budget.yearly_budget_sum.unit_symbol",
+            },
+            "watch": {
+                "numerical_value": "statement.numerical_value",
+                "unit_symbol": "statement.unit_symbol",
+            },
+            "template": "{{{numerical_value}}} {{{unit_symbol}}}",
+        },
+        title="Wert",
+    )
+    unit: str = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "Währung"},
+            "_format": "template",
+            "propertyOrder": 1001,
+            "options": {"grid_columns": 6, "hidden": True},
+            "watch": {"yearly_budget_sum_unit": "yearly_budget.yearly_budget_sum.unit"},
+            "template": "{{yearly_budget_sum_unit}}",
+        },
+        title="Currency",
+    )
+    unit_symbol: str = Field(
+        ...,
+        json_schema_extra={
+            "watch": {
+                "yearly_budget_sum_unit_symbol": "yearly_budget.yearly_budget_sum.unit_symbol"
+            },
+            "template": "{{yearly_budget_sum_unit_symbol}}",
+            "options": {"grid_columns": 6, "hidden": True},
+        },
+    )
+
+
+class Quantity(OswBaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": {
+                "Property": "https://wiki-dev.open-semantic-lab.org/id/Property-3A",
+                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                "quantity*": "Property:HasProperty",
+                "quantity": "rdf:predicate",
+                "value*": "Property:HasObject",
+                "value": "rdf:object",
+                "unit": "Property:HasUnit",
+            },
+            "$comment": "A reduced version of JsonSchema:Statement",
+            "title": "Quantity",
+            "title*": {"de": "Menge"},
+            "_headerTemplate": "{{self.value}}",
+        },
+    )
+    uuid: UUID = Field(
+        ..., json_schema_extra={"options": {"hidden": True}}, title="UUID"
+    )
+    quantity: str = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "Attribut"},
+            "propertyOrder": 10,
+            "options": {
+                "grid_columns": 8,
+                "autocomplete": {"category": "Category:QuantityProperty"},
+            },
+        },
+        title="Property",
+    )
+    numerical_value: str = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "Wert"},
+            "propertyOrder": 20,
+            "options": {"grid_columns": 2},
+        },
+        title="Value",
+    )
+    unit: str = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "Einheit"},
+            "propertyOrder": 30,
+            "watch": {
+                "quantity": "statement.quantity",
+                "unit_symbol": "statement.unit_symbol",
+            },
+            "options": {
+                "grid_columns": 2,
+                "autocomplete": {
+                    "query": "[[-HasInputUnit::{{$(quantity)}}]][[Display_title_of::like:*{{_user_input}}*]]|?Display_title_of=label",
+                    "render_template": {
+                        "type": ["handlebars"],
+                        "value": "{{result.printouts.label.[0]}}",
+                    },
+                    "field_maps": [
+                        {
+                            "source_path": "$",
+                            "template": "{{{result.printouts.label.[0]}}}",
+                            "target_path": "$(unit_symbol)",
+                        }
+                    ],
+                },
+            },
+        },
+        title="Unit",
+    )
+    unit_symbol: str = Field(..., json_schema_extra={"options": {"hidden": True}})
+    value: str = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "Wert"},
+            "watch": {
+                "numerical_value": "statement.numerical_value",
+                "unit_symbol": "statement.unit_symbol",
+            },
+            "template": "{{{numerical_value}}} {{{unit_symbol}}}",
+            "options": {"hidden": True},
+        },
+        title="Value",
+    )
+
+
+class ProbabilityOfSuccessfulFundingInPercent(Quantity):
+    """
+    Indicates the likelihood that the funding will be approved, determines the weighted budget
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "Probability of Successful Funding in percent",
+            "title*": {
+                "de": "Wahrscheinlichkeit einer erfolgreichen Förderung in Prozent"
+            },
+            "description": "Indicates the likelihood that the funding will be approved, determines the weighted budget",
+            "description*": {
+                "de": "Gibt die Wahrscheinlichkeit an, dass die Förderung genehmigt wird, bestimmt das gewichtete Budget"
+            },
+        },
+    )
+    quantity: str | None = Field(
+        "Property:HasProbabilityOfSuccessfulFunding",
+        json_schema_extra={"options": {"hidden": True}},
+    )
+    unit: str | None = Field(
+        "Property:HasDimensionlessRatio#OSW8b3dc9b793074afc8ab8b03041f97f16",
+        json_schema_extra={"readOnly": True},
+    )
+
+
+class TotalBudget(Quantity):
+    model_config = ConfigDict(
+        json_schema_extra={"title": "Total Budget", "title*": {"de": "Budgetsumme"}},
+    )
+    quantity: str | None = Field(
+        "Property:HasBudget", json_schema_extra={"options": {"hidden": True}}
+    )
+    unit: str | None = Field(
+        None, json_schema_extra={"title*": {"de": "Währung"}}, title="Currency"
+    )
+
+
+class YearlyBudgetSum(Quantity):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "Yearly Budget Sum",
+            "title*": {"de": "Summe Jahresbudget"},
+            "options": {
+                "disable_collapse": True,
+                "disable_properties": True,
+                "compact": True,
+            },
+        },
+    )
+    quantity: str | None = Field(
+        "Property:HasBudget", json_schema_extra={"options": {"hidden": True}}
+    )
+    numerical_value: str | None = Field(
+        None, json_schema_extra={"options": {"grid_columns": 6}}
+    )
+    unit: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Währung"},
+            "propertyOrder": 1001,
+            "options": {"grid_columns": 6},
+        },
+        title="Currency",
+    )
+
+
+class Distribution(OswBaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "Distribution",
+            "title*": {"de": "Distribution"},
+            "defaultProperties": ["file", "media_type", "conforms_to"],
+        },
+    )
+    file: File | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Datei"},
+            "description*": {"de": "Die Dateientität, die die Bytes enthält"},
+            "range": "Category:OSWff333fd349af4f65a69100405a9e60c7",
+        },
+        title="File",
+    )
+    """
+    The file entity holding the bytes
+    """
+    media_type: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Medientyp"},
+            "description*": {
+                "de": "IANA-Medientyp dieser Repräsentation, z. B. text/csv"
+            },
+        },
+        title="Media type",
+    )
+    """
+    IANA media type of this representation, e. g. text/csv
+    """
+    byte_size: conint(ge=0) | None = Field(
+        None, json_schema_extra={"title*": {"de": "Größe in Byte"}}, title="Byte size"
+    )
+    package_format: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Paketformat"},
+            "description*": {
+                "de": "Container, in dem die Bytes verpackt sind, z. B. zip"
+            },
+        },
+        title="Package format",
+    )
+    """
+    Container the bytes are packaged in, e. g. zip
+    """
+    compression_format: str | None = Field(
+        None,
+        json_schema_extra={"title*": {"de": "Kompressionsformat"}},
+        title="Compression format",
+    )
+    conforms_to: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Entspricht"},
+            "description*": {"de": "Das Datensatzschema, das diese Bytes verkörpern"},
+            "options": {
+                "autocomplete": {
+                    "$comment": "Any Category",
+                    "query": "[[:Category:%2B]]",
+                }
+            },
+        },
+        title="Conforms to",
+    )
+    """
+    The dataset schema these bytes embody
+    """
+    table_schema: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Tabellenschema"},
+            "description*": {
+                "de": "Das Zeilenschema, wenn die Serialisierung tabellarisch ist"
+            },
+            "options": {
+                "autocomplete": {
+                    "$comment": "Any Category",
+                    "query": "[[:Category:%2B]]",
+                }
+            },
+        },
+        title="Table schema",
+    )
+    """
+    The row schema, where the serialization is tabular
+    """
+    download_url: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Download-URL"},
+            "description*": {
+                "de": "Direkte URL, wenn keine Dateientität verwendet wird"
+            },
+        },
+        title="Download URL",
+    )
+    """
+    Direct URL, where no file entity is used
+    """
+    access_url: str | None = Field(
+        None, json_schema_extra={"title*": {"de": "Zugriffs-URL"}}, title="Access URL"
+    )
+
+
+class TaxIdAndCountry(OswBaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "TaxIdAndCountry",
+            "title*": {"en": "Tax ID and country", "de": "Steuer-ID und Land"},
+        },
+    )
+    tax_id: str | None = Field(
+        None, json_schema_extra={"title*": {"de": "ID"}}, title="ID"
+    )
+    country: Country | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Land"},
+            "range": "Category:OSW0551abcd6f734047825e3ded4c8a0ffe",
+        },
+        title="Country",
+    )
+
+
+class VatIdAndCountry(OswBaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "VatIdAndCountry",
+            "title*": {"en": "VAT ID and country", "de": "USt-ID und Land"},
+        },
+    )
+    vat_id: str | None = Field(
+        None, json_schema_extra={"title*": {"de": "ID"}}, title="ID"
+    )
+    country: Country | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Land"},
+            "range": "Category:OSW0551abcd6f734047825e3ded4c8a0ffe",
+        },
+        title="Country",
+    )
 
 
 class PostalAddress(OswBaseModel):
@@ -1354,289 +1637,539 @@ class PostalAddress(OswBaseModel):
     """
 
 
-class Location(Item):
-    """
-    A location. Entities that have a somewhat fixed, physical extension.
-    """
-
+class Component(OswBaseModel):
     model_config = ConfigDict(
         json_schema_extra={
-            "@context": [
-                {
-                    "gps_coordinates": {"@id": "schema:geo", "@type": "xsd:string"},
-                    "gps_coordinates*": {
-                        "@id": "Property:HasGpsCoordinates",
-                        "@type": "xsd:string",
-                    },
-                    "latitude": {"@id": "schema:latitude", "@type": "xsd:float"},
-                    "located_in": {"@id": "schema:containedInPlace", "@type": "@id"},
-                    "located_in*": {"@id": "Property:IsLocatedIn", "@type": "@id"},
-                    "longitude": {"@id": "schema:longitude", "@type": "xsd:float"},
-                    "longitude*": {
-                        "@id": "Property:HasLongitude",
-                        "@type": "xsd:float",
-                    },
-                    "postal_address": {
-                        "@id": "Property:HasPostalAddress",
-                        "@type": "@id",
-                        "@context": ["/wiki/JsonSchema:PostalAddress?action=raw"],
-                    },
-                },
-                "/wiki/Category:Item?action=raw&slot=jsonschema",
-            ],
-            "title": "Location",
-            "uuid": "3d238d05-316e-45a4-ac95-a11d7b24e36b",
-            "title*": {"en": "Location", "de": "Örtlichkeit"},
-            "description": "A location. Entities that have a somewhat fixed, physical extension.",
-            "description*": {
-                "de": "Eine Örtlichkeit. Entitaeten, die eine mehr oder weniger feste, physische Ausdehnung haben."
-            },
-            "defaultProperties": ["label", "gps_coordinates", "postal_address"],
+            "title": "Component",
+            "title*": {"de": "Komponente"},
+            "headerTemplate": "{{ i1 }} - {{ self.component_id }}",
+            "defaultProperties": [],
         },
     )
-    type: list[str] | None = ["Category:OSW3d238d05316e45a4ac95a11d7b24e36b"]
-    postal_address: PostalAddress | None = None
-    gps_coordinates: GPSCoordinates | None = Field(
+    uuid: UUID = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "UUID"},
+            "$comment": "format uuid field are copied, if not set in copy_ignore",
+            "_template": "dynamic_template",
+            "dynamic_template": "{{_uuid_}}",
+            "options": {"hidden": True, "dynamic_template": {"override": "empty"}},
+        },
+        title="UUID",
+    )
+    component_id: str = Field(
+        ...,
+        json_schema_extra={
+            "$comment": "Will be used as a visual reference for the user",
+            "title*": {"de": "ID"},
+            "description*": {"de": "Wird automatisch generiert"},
+            "dynamic_template": "Component{{patternformat '00' _array_index_}}",
+            "readOnly": True,
+            "options": {
+                "hidden": True,
+                "dynamic_template": {"override": "always"},
+                "grid_columns": 6,
+            },
+            "propertyOrder": 10,
+        },
+        title="ID",
+    )
+    """
+    Automatically generated
+    """
+    label: list[Label] | None = Field(
         None,
         json_schema_extra={
-            "title*": {"en": "GPS coordinates", "de": "GPS Koordinaten"},
+            "title*": {"de": "Bezeichnung"},
+            "description*": {
+                "de": "Bezeichnung der Funktion oder Rolle der Komponente in diesem spezifischen Kontext."
+            },
             "eval_template": {
-                "type": "wikitext",
-                "value": "{{{latitude|}}}, {{{longitude|}}}",
+                "type": "mustache-wikitext",
+                "mode": "render",
+                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#label}} |{{lang}}={{text}} {{/label}} {{=<% %>=}} }}",
             },
-            "defaultProperties": ["uuid", "latitude", "longitude"],
+            "options": {"grid_columns": 12},
+            "propertyOrder": 20,
         },
-        title="GPS coordinates",
+        title="Label",
     )
-
-
-class Place(Item):
     """
-    Entities that have a somewhat fixed, physical extension.
+    Designation of the function or role of the component in this specific context.
     """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": ["/wiki/Category:Item?action=raw&slot=jsonschema"],
-            "uuid": "28f71f2c-20ad-48c3-8c4e-4d190a95c0b8",
-            "title": "Place",
-            "title*": {"en": "Place", "de": "Ort"},
-            "description": "Entities that have a somewhat fixed, physical extension.",
-            "description*": {
-                "en": "Entities that have a somewhat fixed, physical extension.",
-                "de": "Entitäten, die eine gewisse feste, physische Ausdehnung haben.",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW28f71f2c20ad48c38c4e4d190a95c0b8"]
-
-
-class AdministrativeArea(Place):
-    """
-    A geographical region, typically under the jurisdiction of a particular government.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW28f71f2c20ad48c38c4e4d190a95c0b8?action=raw&slot=jsonschema"
-            ],
-            "uuid": "137e7443-b2b9-4692-bd59-a0e0a6778b70",
-            "title": "AdministrativeArea",
-            "title*": {"en": "Administrative Area", "de": "Verwaltungsbereich"},
-            "description": "A geographical region, typically under the jurisdiction of a particular government.",
-            "description*": {
-                "en": "A geographical region, typically under the jurisdiction of a particular government.",
-                "de": "Eine geografische Region, die in der Regel unter die Zuständigkeit einer bestimmten Regierung fällt.",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW137e7443b2b94692bd59a0e0a6778b70"]
-
-
-class Country(AdministrativeArea):
-    """
-    A distinct part of the world, such as a state, nation, or other political entity
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
-            ],
-            "uuid": "0551abcd-6f73-4047-825e-3ded4c8a0ffe",
-            "title": "Country",
-            "title*": {"en": "Country", "de": "Land"},
-            "description": "A distinct part of the world, such as a state, nation, or other political entity",
-            "description*": {
-                "en": "A distinct part of the world, such as a state, nation, or other political entity",
-                "de": "Ein bestimmter Teil der Welt, z. B. ein Staat, eine Nation oder eine andere politische Einheit",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW0551abcd6f734047825e3ded4c8a0ffe"]
-
-
-class State(AdministrativeArea):
-    """
-    A state or province of a country.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
-            ],
-            "uuid": "ab60f9a2-2795-4ee0-be92-344ff6272420",
-            "title": "State",
-            "title*": {"en": "State", "de": "Staat"},
-            "description": "A state or province of a country.",
-            "description*": {
-                "en": "A state or province of a country.",
-                "de": "Ein Staat oder eine Provinz eines Landes.",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSWab60f9a227954ee0be92344ff6272420"]
-
-
-class Region(AdministrativeArea):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
-            ],
-            "uuid": "95efaf34-e2c7-439e-8e79-67233910e44b",
-            "title": "Region",
-            "title*": {"en": "Region", "de": "Region"},
-            "description": "",
-            "description*": {},
-        },
-    )
-    type: list[str] | None = ["Category:OSW95efaf34e2c7439e8e7967233910e44b"]
-
-
-class City(AdministrativeArea):
-    """
-    A city or town.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
-            ],
-            "uuid": "807f1da5-b42e-42f2-96b2-13ab06ca873b",
-            "title": "City",
-            "title*": {"en": "Stadt"},
-            "description": "A city or town.",
-            "description*": {
-                "en": "A city or town.",
-                "de": "Eine Stadt oder ein Ort, im Sinne einer Gemeinde",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW807f1da5b42e42f296b213ab06ca873b"]
-
-
-# generated by datamodel-codegen:
-#   filename:  OSW28f71f2c20ad48c38c4e4d190a95c0b8.json
-
-
-# generated by datamodel-codegen:
-#   filename:  OSW473d7a1ed48544d1be83b258b5810948.json
-
-
-class Site(Location):
-    """
-    A site is a location or place where a particular event, activity, or object exists or is situated.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW3d238d05316e45a4ac95a11d7b24e36b?action=raw&slot=jsonschema"
-            ],
-            "title": "Site",
-            "title*": {"en": "Site", "de": "Standort"},
-            "uuid": "473d7a1e-d485-44d1-be83-b258b5810948",
-            "description": "A site is a location or place where a particular event, activity, or object exists or is situated.",
-            "description*": {
-                "de": "Ein Standort ist ein Ort oder ein Platz, an dem ein bestimmtes Ereignis, eine Aktivität oder ein Objekt existiert oder sich befindet."
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW473d7a1ed48544d1be83b258b5810948"]
-
-
-# generated by datamodel-codegen:
-#   filename:  OSW4bcd4a99a73f482ea40ac4210dfab836.json
-
-
-class DisplayName(OswBaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={"title": "Display name", "title*": {"de": "Anzeigenamen"}},
-    )
-    text: Any | None = Field(
+    description: list[Description] | None = Field(
         None,
         json_schema_extra={
-            "watch": {
-                "first_name": "root.first_name",
-                "middle_name": "root.middle_name",
-                "surname": "root.surname",
+            "title*": {"de": "Beschreibung"},
+            "description*": {
+                "de": "Optional, zusätzliche Angaben zur Rolle oder Funktion der Komponente in diesem spezifischen Kontext."
             },
-            "readonly": True,
-            "dynamic_template": "{{first_name}}{{#each middle_name}} {{.}}{{/each}}{{#if surname}} {{{surname}}}{{/if}}",
+            "eval_template": {
+                "type": "mustache-wikitext",
+                "mode": "render",
+                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#description}} |{{lang}}={{text}} {{/description}} {{=<% %>=}} }}",
+            },
+            "options": {"grid_columns": 12},
+            "propertyOrder": 30,
         },
+        title="Description",
     )
-    lang: str | None = "en"
-
-
-class TaxIdAndCountry(OswBaseModel):
-    model_config = ConfigDict(
+    """
+    Optional, additional details on the role or function of the component in this specific context.
+    """
+    component_type: Category | None = Field(
+        default_factory=lambda: Category.model_validate(
+            "Category:OSWe427aafafbac4262955b9f690a83405d"
+        ),
         json_schema_extra={
-            "title": "TaxIdAndCountry",
-            "title*": {"en": "Tax ID and country", "de": "Steuer-ID und Land"},
+            "title*": {"de": "Typ der Komponente"},
+            "range": "Category:Category",
+            "options": {
+                "autocomplete": {
+                    "$comment": "Tool",
+                    "query": "[[:Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]",
+                },
+                "grid_columns": 12,
+            },
+            "propertyOrder": 40,
+            "x-oold-required-iri": True,
         },
+        title="Component type",
     )
-    tax_id: str | None = Field(
-        None, json_schema_extra={"title*": {"de": "ID"}}, title="ID"
+    component_instance_property: str | None = Field(
+        "Property:HasPart", json_schema_extra={"options": {"hidden": True}}
     )
-    country: Country | None = Field(
+    component_instance: Tool | None = Field(
         None,
         json_schema_extra={
-            "title*": {"de": "Land"},
-            "range": "Category:OSW0551abcd6f734047825e3ded4c8a0ffe",
+            "title*": {"de": "Instanz"},
+            "range": "Category:OSWe427aafafbac4262955b9f690a83405d",
+            "watch": {"component_type_": "component.component_type"},
+            "options": {
+                "autocomplete": {
+                    "query": "[[HasType::$(component_type_)]]|?Display_title_of=label|?HasImage=image|?HasDescription=description"
+                },
+                "grid_columns": 12,
+            },
+            "propertyOrder": 50,
+            "x-oold-required-iri": True,
         },
-        title="Country",
+        title="Instance",
     )
 
 
-class VatIdAndCountry(OswBaseModel):
+class InitialOccupantOfTheSlot(OswBaseModel):
+    """
+    Tool or component installed in the slot.
+    """
+
     model_config = ConfigDict(
         json_schema_extra={
-            "title": "VatIdAndCountry",
-            "title*": {"en": "VAT ID and country", "de": "USt-ID und Land"},
+            "title": "Initial occupant of the slot",
+            "title*": {"de": "Initiale Belegung des Slots"},
+            "description": "Tool or component installed in the slot.",
+            "description*": {"de": "Im Slot installiertes Werkzeug oder Komponente."},
+            "defaultProperties": ["slot_occupant_type"],
+            "options": {"grid_columns": 12},
+            "propertyOrder": 60,
         },
     )
-    vat_id: str | None = Field(
-        None, json_schema_extra={"title*": {"de": "ID"}}, title="ID"
-    )
-    country: Country | None = Field(
+    slot_occupant_type: Category | None = Field(
         None,
         json_schema_extra={
-            "title*": {"de": "Land"},
-            "range": "Category:OSW0551abcd6f734047825e3ded4c8a0ffe",
+            "title*": {"de": "Typ"},
+            "range": "Category:Category",
+            "watch": {"slot_type": "slot.slot_type_restriction"},
+            "options": {
+                "autocomplete": {
+                    "$comment": "Tool",
+                    "query": "[[:$(slot_type)]]OR[[SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf.SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf.SubClassOf::$(slot_type)]]",
+                }
+            },
+            "propertyOrder": 11,
         },
-        title="Country",
+        title="Type",
+    )
+    slot_occupant_instance_property: str | None = Field(
+        "Property:HasOccupant", json_schema_extra={"options": {"hidden": True}}
+    )
+    slot_occupant_instance: Tool | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Instanz"},
+            "range": "Category:OSWe427aafafbac4262955b9f690a83405d",
+            "watch": {"slot_occupant_type_": "slot_occupant.slot_occupant_type"},
+            "options": {
+                "autocomplete": {
+                    "query": "[[HasType::$(slot_occupant_type_)]]|?Display_title_of=label|?HasImage=image|?HasDescription=description"
+                }
+            },
+            "propertyOrder": 21,
+            "x-oold-required-iri": True,
+        },
+        title="Instance",
     )
 
 
-class BuildingFunction(Item):
+class Slot(OswBaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"title": "BuildingFunction"},
+        json_schema_extra={
+            "title": "Slot",
+            "title*": {"de": "Slot"},
+            "headerTemplate": "{{ i1 }} - {{ self.slot_id }}",
+            "defaultProperties": ["name", "description", "slot_occupant"],
+        },
     )
-    type: list[str] | None = ["Category:OSW07a0faef5be94b788514a2dd5dca20bf"]
+    uuid: str = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "UUID"},
+            "$comment": "format uuid field are copied, if not set in copy_ignore",
+            "_format": "uuid",
+            "_template": "dynamic_template",
+            "dynamic_template": "{{_uuid_}}",
+            "options": {"hidden": True, "dynamic_template": {"override": "empty"}},
+        },
+        title="UUID",
+    )
+    slot_osw_id: str = Field(
+        ...,
+        json_schema_extra={
+            "$comment": "Will be used an unique reference for slot exchange events.",
+            "title*": {"de": "OSW-ID"},
+            "watch": {"_own_uuid": "slot.uuid"},
+            "_format": "dynamic_template",
+            "dynamic_template": "{{_current_subject_}}#OSW{{#replace '-' ''}}{{_own_uuid}}{{/replace}}",
+            "readOnly": True,
+            "options": {"hidden": True, "dynamic_template": {"override": "empty"}},
+        },
+        title="OSW-ID",
+    )
+    slot_id: str = Field(
+        ...,
+        json_schema_extra={
+            "$comment": "Will be used as a visual reference for the user",
+            "title*": {"de": "ID"},
+            "description*": {"de": "Wird automatisch generiert"},
+            "dynamic_template": "Slot{{patternformat '00' _array_index_}}",
+            "readOnly": True,
+            "options": {
+                "hidden": True,
+                "dynamic_template": {"override": "always"},
+                "grid_columns": 6,
+            },
+            "propertyOrder": 10,
+        },
+        title="ID",
+    )
+    """
+    Automatically generated
+    """
+    name: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Name"},
+            "options": {"grid_columns": 6},
+            "propertyOrder": 20,
+        },
+        title="Name",
+    )
+    description: list[Description] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Beschreibung"},
+            "eval_template": {
+                "type": "mustache-wikitext",
+                "mode": "render",
+                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#description}} |{{lang}}={{text}} {{/description}} {{=<% %>=}} }}",
+            },
+            "options": {"grid_columns": 12},
+            "propertyOrder": 30,
+        },
+        title="Description",
+    )
+    slot_init_date_time: AwareDatetime = Field(
+        ...,
+        json_schema_extra={
+            "title*": {"de": "Datum der Slot-Initialisierung"},
+            "dynamic_template": "{{_now_}}",
+            "options": {"dynamic_template": {"override": "empty"}, "grid_columns": 4},
+            "propertyOrder": 21,
+        },
+        title="Date of slot initialization",
+    )
+    slot_type_restriction: Category | None = Field(
+        default_factory=lambda: Category.model_validate(
+            "Category:OSWe427aafafbac4262955b9f690a83405d"
+        ),
+        json_schema_extra={
+            "title*": {"de": "Typeinschränkung des Slots"},
+            "range": "Category:Category",
+            "options": {
+                "autocomplete": {
+                    "$comment": "Tool",
+                    "query": "[[:Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]",
+                }
+            },
+            "propertyOrder": 50,
+            "x-oold-required-iri": True,
+        },
+        title="Type restriction of the slot",
+    )
+    slot_occupant: InitialOccupantOfTheSlot | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Initiale Belegung des Slots"},
+            "description*": {"de": "Im Slot installiertes Werkzeug oder Komponente."},
+            "defaultProperties": ["slot_occupant_type"],
+            "options": {"grid_columns": 12},
+            "propertyOrder": 60,
+        },
+        title="Initial occupant of the slot",
+    )
+    """
+    Tool or component installed in the slot.
+    """
+
+
+class YearlyBudget(OswBaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "Yearly budget",
+            "title*": {"de": "Jahresbudget"},
+            "defaultProperties": [
+                "budget_year",
+                "yearly_budget_sum",
+                "budget_type",
+                "budget_ou",
+            ],
+        },
+    )
+    uuid: UUID = Field(
+        ..., json_schema_extra={"options": {"hidden": True}}, title="UUID"
+    )
+    budget_year: str | None = Field(
+        None, json_schema_extra={"title*": {"de": "Jahr"}}, title="Year"
+    )
+    yearly_budget_sum: YearlyBudgetSum | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Summe Jahresbudget"},
+            "options": {
+                "disable_collapse": True,
+                "disable_properties": True,
+                "compact": True,
+            },
+        },
+        title="Yearly Budget Sum",
+    )
+    yearly_budget_sum_weighted: WeightedSum | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Gewichtete Summe"},
+            "_description": "weighted with probability of successful funding",
+            "_description*": {"de": "gewichtet mit Erfolgswahrscheinlichkeit"},
+            "options": {
+                "disable_collapse": True,
+                "disable_properties": True,
+                "compact": True,
+            },
+        },
+        title="weighted sum",
+    )
+    budget_start: date | None = Field(
+        None, json_schema_extra={"title*": {"de": "Beginn"}}, title="Start"
+    )
+    budget_end: date | None = Field(
+        None, json_schema_extra={"title*": {"de": "Ende"}}, title="End"
+    )
+    budget_ou: OrganizationalUnit | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"en": "OU", "de": "OE"},
+            "range": "Category:OSW3cb8cef2225e403092f098f99bc4c472",
+        },
+        title="OU",
+    )
+    budget_type: BudgetType | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Typ"},
+            "range": "Category:OSW595b282aedf048788f3ee326454792ce",
+        },
+        title="Type",
+    )
+
+
+class DatasetSchema(Item):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [{"schema_definition": "Property:HasSchemaDefinition"}],
+            "title": "DatasetSchema",
+            "defaultProperties": ["schema_definition", "label", "uuid"],
+        },
+    )
+    schema_definition: str | None = Field(None, title="Dataset schema")
+    """
+    Defintion of a JSON based Schema for a dataset.
+    """
+    type: list[str] | None = ["Category:OSW0d6584b3e2b64e9595733c4c3963c486"]
+
+
+class Process(Item):
+    """
+    Members of the Process Category describe the act of changing the state or properties of something
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:Item?action=raw&slot=jsonschema",
+                {
+                    "type": {"@id": "Property:HasType", "@type": "@id"},
+                    "type*": {"@id": "Property:HasSchema", "@type": "@id"},
+                    "tool": {"@id": "Property:HasTool", "@type": "@id"},
+                    "input": {"@id": "Property:HasInput", "@type": "@id"},
+                    "location": {"@id": "Property:HasLocation", "@type": "@id"},
+                    "location_name": {"@id": "Property:HasLocation", "@type": "@id"},
+                    "output": {"@id": "Property:HasOutput", "@type": "@id"},
+                    "creator": {"@id": "Property:HasCreator", "@type": "@id"},
+                    "actionees": {"@id": "Property:HasActionee", "@type": "@id"},
+                    "projects": {"@id": "Property:HasProject", "@type": "@id"},
+                    "status": {"@id": "Property:HasStatus", "@type": "@id"},
+                    "start_date_time": {
+                        "@id": "Property:HasStartDateAndTime",
+                        "@type": "xsd:dateTime",
+                    },
+                    "duration": {"@id": "Property:HasDuration"},
+                    "end_date_time": {
+                        "@id": "Property:HasEndDateAndTime",
+                        "@type": "xsd:dateTime",
+                    },
+                    "subprocesses": {"@id": "Property:HasPart", "@type": "@id"},
+                },
+            ],
+            "title": "Process",
+            "title*": {"en": "Process", "de": "Prozess"},
+            "uuid": "5a07d666-c55b-4ffa-89d4-9633c708029d",
+            "description": "Members of the Process Category describe the act of changing the state or properties of something",
+            "description*": {
+                "en": "Members of the Process Category describe the act of changing the state or properties of something",
+                "de": "Prozesse beschreiben den Akt des Änderns eines Zustandes oder der Eigenschaften von etwas.",
+            },
+            "defaultProperties": [
+                "actionees",
+                "start_date_time",
+                "tool",
+                "input",
+                "output",
+            ],
+        },
+    )
+    type: list[str] | None = ["Category:OSWe5aa96bffb1c4d95be7fbd46142ad203"]
+    creator: Person | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Ersteller"},
+            "range": "Category:OSW44deaa5b806d41a2a88594f562b110e9",
+        },
+        title="Creator",
+    )
+    actionees: list[Person] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Akteure"},
+            "range": "Category:OSW44deaa5b806d41a2a88594f562b110e9",
+        },
+        title="Actionees",
+    )
+    start_date_time: AwareDatetime | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Startzeitpunkt"},
+            "$comment": 'Note: To hide the time, you can set {"options":  {"flatpickr": {"dateFormat": "Z", "altInput": true, "altFormat": "Y-m-d"}}}',
+        },
+        title="Start time",
+    )
+    duration: timedelta | None = Field(
+        None, json_schema_extra={"title*": {"de": "Dauer"}}, title="Duration"
+    )
+    end_date_time: AwareDatetime | None = Field(
+        None, json_schema_extra={"title*": {"de": "Endzeitpunkt"}}, title="End time"
+    )
+    location: Location | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Ort"},
+            "range": "Category:OSW3d238d05316e45a4ac95a11d7b24e36b",
+        },
+        title="Location",
+    )
+    location_name: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Ort (Text)"},
+            "description*": {
+                "de": "Vorzugsweise sollte ein Ort aus dem Autocomplete-Feld 'Ort' ausgewählt oder erstellt werden."
+            },
+        },
+        title="Location (text)",
+    )
+    """
+    Its prefered to select or create a location from or in the autocomplete field 'Location'.
+    """
+    status: Status | None = Field(
+        None,
+        json_schema_extra={
+            "_format": "autocomplete",
+            "options": {
+                "_autocomplete": {
+                    "category": "Category:OSW9725d7a91bab4f1aa68f423e4e9bfcf4"
+                },
+                "enum_titles": ["To do", "In work", "Done"],
+                "enum_titles*": {"de": ["Zu tun", "In Arbeit", "Erledigt"]},
+                "grid_columns": 6,
+            },
+        },
+        title="Status",
+    )
+    tool: list[Tool] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Werkzeuge"},
+            "options": {"conditional_visible": {"modes": ["query", "default"]}},
+            "range": "Category:OSWe427aafafbac4262955b9f690a83405d",
+        },
+        title="Tools",
+    )
+    input: list[Item] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Eingangsressource (Input)"},
+            "options": {"conditional_visible": {"modes": ["query", "default"]}},
+            "range": "Category:Item",
+        },
+        title="Inputs",
+    )
+    output: list[Item] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Ausgangsressource (Output)"},
+            "options": {"conditional_visible": {"modes": ["query", "default"]}},
+            "range": "Category:Item",
+        },
+        title="Outputs",
+    )
+    projects: list[Project] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Projekt(e)"},
+            "options": {"conditional_visible": {"modes": ["query", "default"]}},
+            "range": "Category:OSWb2d7e6a2eff94c82b7f1f2699d5b0ee3",
+        },
+        title="Project(s)",
+    )
+    parameters: dict[str, Any] | None = Field(None, title="Parameters")
 
 
 class Person(Item):
@@ -2314,6 +2847,83 @@ class OrganizationalUnit(Item):
     )
 
 
+class Place(Item):
+    """
+    Entities that have a somewhat fixed, physical extension.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": ["/wiki/Category:Item?action=raw&slot=jsonschema"],
+            "uuid": "28f71f2c-20ad-48c3-8c4e-4d190a95c0b8",
+            "title": "Place",
+            "title*": {"en": "Place", "de": "Ort"},
+            "description": "Entities that have a somewhat fixed, physical extension.",
+            "description*": {
+                "en": "Entities that have a somewhat fixed, physical extension.",
+                "de": "Entitäten, die eine gewisse feste, physische Ausdehnung haben.",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW28f71f2c20ad48c38c4e4d190a95c0b8"]
+
+
+class Location(Item):
+    """
+    A location. Entities that have a somewhat fixed, physical extension.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                {
+                    "gps_coordinates": {"@id": "schema:geo", "@type": "xsd:string"},
+                    "gps_coordinates*": {
+                        "@id": "Property:HasGpsCoordinates",
+                        "@type": "xsd:string",
+                    },
+                    "latitude": {"@id": "schema:latitude", "@type": "xsd:float"},
+                    "located_in": {"@id": "schema:containedInPlace", "@type": "@id"},
+                    "located_in*": {"@id": "Property:IsLocatedIn", "@type": "@id"},
+                    "longitude": {"@id": "schema:longitude", "@type": "xsd:float"},
+                    "longitude*": {
+                        "@id": "Property:HasLongitude",
+                        "@type": "xsd:float",
+                    },
+                    "postal_address": {
+                        "@id": "Property:HasPostalAddress",
+                        "@type": "@id",
+                        "@context": ["/wiki/JsonSchema:PostalAddress?action=raw"],
+                    },
+                },
+                "/wiki/Category:Item?action=raw&slot=jsonschema",
+            ],
+            "title": "Location",
+            "uuid": "3d238d05-316e-45a4-ac95-a11d7b24e36b",
+            "title*": {"en": "Location", "de": "Örtlichkeit"},
+            "description": "A location. Entities that have a somewhat fixed, physical extension.",
+            "description*": {
+                "de": "Eine Örtlichkeit. Entitaeten, die eine mehr oder weniger feste, physische Ausdehnung haben."
+            },
+            "defaultProperties": ["label", "gps_coordinates", "postal_address"],
+        },
+    )
+    type: list[str] | None = ["Category:OSW3d238d05316e45a4ac95a11d7b24e36b"]
+    postal_address: PostalAddress | None = None
+    gps_coordinates: GPSCoordinates | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"en": "GPS coordinates", "de": "GPS Koordinaten"},
+            "eval_template": {
+                "type": "wikitext",
+                "value": "{{{latitude|}}}, {{{longitude|}}}",
+            },
+            "defaultProperties": ["uuid", "latitude", "longitude"],
+        },
+        title="GPS coordinates",
+    )
+
+
 class PersonRole(Item):
     model_config = ConfigDict(
         json_schema_extra={
@@ -2372,6 +2982,996 @@ class PersonRole(Item):
     Original label of the role in MIRI
     """
     type: list[str] | None = ["Category:OSW5efde23b1d8c4e1c864ef039cb0616ed"]
+
+
+class Tool(Item):
+    """
+    Item that participates as a utility (almost) unchanged in a process
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:Item?action=raw&slot=jsonschema",
+                {
+                    "components": {
+                        "@id": "Property:HasStatement",
+                        "@type": "@id",
+                        "@context": {
+                            "component_instance_property": {
+                                "@id": "Property:HasProperty",
+                                "@type": "@id",
+                            },
+                            "component_instance": {
+                                "@id": "Property:HasObject",
+                                "@type": "@id",
+                            },
+                        },
+                    },
+                    "events": {"@id": "Property:HasEvent", "@type": "@id"},
+                    "purposes": {"@id": "Property:HasPurpose", "@type": "xsd:string"},
+                    "slots": {
+                        "@id": "Property:HasSlot",
+                        "@type": "@id",
+                        "@context": {
+                            "slot_osw_id": {
+                                "@id": "Property:HasOswId",
+                                "@type": "xsd:string",
+                            },
+                            "slot_id": {"@id": "Property:HasId", "@type": "xsd:string"},
+                            "name": {"@id": "Property:HasName", "@type": "xsd:string"},
+                            "description": {
+                                "@id": "Property:HasDescription",
+                                "@type": "@id",
+                            },
+                            "slot_init_date_time": {
+                                "@id": "Property:HasInitDate",
+                                "@type": "xsd:dateTime",
+                            },
+                            "slot_occupant": {
+                                "@id": "Property:HasStatement",
+                                "@type": "@id",
+                                "@context": {
+                                    "slot_occupant_instance_property": "Property:HasProperty",
+                                    "slot_occupant_instance": "Property:HasObject",
+                                },
+                            },
+                            "slot_type_restriction": {
+                                "@id": "Property:HasTypeRestriction",
+                                "@type": "@id",
+                            },
+                        },
+                    },
+                    "typical_process": {
+                        "@id": "Property:HasTypicalProcess",
+                        "@type": "@id",
+                    },
+                },
+            ],
+            "uuid": "e427aafa-fbac-4262-955b-9f690a83405d",
+            "title": "Tool",
+            "title*": {"en": "Tool", "de": "Werkzeug"},
+            "description": "Item that participates as a utility (almost) unchanged in a process",
+            "description*": {
+                "en": "Item that participates as a utility (almost) unchanged in a process",
+                "de": "Gegenstand der als Hilfsmittel (nahezu) unverändert in einem Prozess teilnimmt",
+            },
+            "defaultProperties": [],
+        },
+    )
+    type: list[str] | None = ["Category:OSWe427aafafbac4262955b9f690a83405d"]
+    purposes: list[str] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Zweck(e)"},
+            "eval_template": [
+                {
+                    "type": "mustache-wikitext",
+                    "mode": "render",
+                    "value": "{{=<% %>=}} <ul><%#purposes%><li><%.%></li><%/purposes%></ul>",
+                }
+            ],
+        },
+        title="Purpose(s)",
+    )
+    typical_process: list[Category] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Typische(r) Prozess(e)"},
+            "eval_template": [
+                {
+                    "type": "mustache-wikitext",
+                    "mode": "render",
+                    "value": "{{=<% %>=}} <ul><%#typical_process%><li>[[:<%.%>]]</li><%/typical_process%></ul>",
+                }
+            ],
+            "range": "Category:Category",
+        },
+        title="Typical Process(es)",
+    )
+    components: list[Component] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Komponenten"},
+            "description*": {
+                "de": "Komponenten sind dauerhafte Teile eines Werkzeugs (im Gegensatz zu Slots für austauschbare Teile)."
+            },
+            "options": {
+                "enable_array_copy": True,
+                "array_copy_ignore": ["uuid", "component_id", "attachments"],
+            },
+            "eval_template": [
+                {
+                    "type": "mustache-wikitext",
+                    "mode": "render",
+                    "value": "{{=<% %>=}} <ul><%#components%><li>[[<%component_instance%>]] ({{#switch:{{USERLANGUAGECODE}}|en=Type|de=Typ|#default=Type}}: {{#ask:[[<%component_instance%>]]|?HasType=|format=plain|mainlabel=-}})</li><%/components%></ul>",
+                }
+            ],
+        },
+        title="Components",
+    )
+    """
+    Component are permanent parts of a tool (vs. Slots for exchangeable parts).
+    """
+    slots: list[Slot] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Slot-Konfiguration"},
+            "description*": {
+                "de": "Slots stellen Plätze für austauschbare Teile oder Komponenten eines Werkzeugs dar (im Gegensatz zu Komponenten, die permanente Teile sind). Slot-Austauschereignisse können verwendet werden, um Änderungen an Slots zu dokumentieren. Dies ist die anfängliche Slot-Konfiguration!"
+            },
+            "options": {
+                "enable_array_copy": True,
+                "array_copy_ignore": ["uuid", "slot_osw_id", "slot_id", "attachments"],
+            },
+            "eval_template": [
+                {
+                    "type": "mustache-wikitext",
+                    "mode": "render",
+                    "value": "{{=<% %>=}} <ul> <%#slots%> <li> {{Viewer/Link |page=<%slot_osw_id%>}}: {{#if: <!-- if there's at least one ToolMaintenanceEvent-->{{#ask: [[Category:OSW5433f882b9f14dca81994e058c8ab4a0]][[HasTarget::{{FULLPAGENAME}}]][[HasAction.HasSlot::<%slot_osw_id%>]]|sort=HasEndDate|order=desc|format=plain|link=none|limit=1|searchlabel=}}<!-- use the action of the latest ToolMaintenanceEvent-->|{{#ask:[[-HasAction.HasType::Category:OSW5433f882b9f14dca81994e058c8ab4a0]][[HasSlot::<%slot_osw_id%>]]<!-- same query as above-->[[-HasAction::{{#ask: [[Category:OSW5433f882b9f14dca81994e058c8ab4a0]][[HasTarget::{{FULLPAGENAME}}]][[HasAction.HasSlot::<%slot_osw_id%>]]|sort=HasEndDate|order=desc|format=plain|link=none|limit=1|searchlabel=}}]] <!-- -->|?HasOccupant=|format=plain|mainlabel=-|default={{#switch:{{USERLANGUAGECODE}}|de=Keine Belegung|#default=No occupant}} }} <!-- else use the default occupant-->|{{#ask: [[<%slot_osw_id%>]]|?HasOccupant=|format=plain|sort=HasInitDate|order=desc|limit=1|searchlabel=|mainlabel=-|default={{#switch:{{USERLANGUAGECODE}}|de=Keine Belegung|#default=No occupant}}}} }} </li> <%/slots%> </ul>",
+                }
+            ],
+        },
+        title="Slot configuration",
+    )
+    """
+    Slots represent spaces for exchangable parts or components of a tool (vs. Components, which are permanent parts). Slot exchange events can be used to document changes on slots. This is the initial slot configuration!
+    """
+    events: list[Event] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Ereignis(se)"},
+            "range": "Category:OSWb97757b46edb430591758662c18d354d",
+        },
+        title="Event(s)",
+    )
+
+
+class Project(Item):
+    """
+    An enterprise (potentially individual but typically collaborative), planned to achieve a particular aim.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:Item?action=raw&slot=jsonschema",
+                {
+                    "abstract": {"@id": "Property:HasAbstract"},
+                    "budget_end": {"@id": "Property:HasBudgetEndDate"},
+                    "budget_ou": {"@id": "Property:HasBusinessUnit", "@type": "@id"},
+                    "budget_start": {"@id": "Property:HasBudgetStartDate"},
+                    "budget_type": {"@id": "Property:HasType", "@type": "@id"},
+                    "budget_year": {"@id": "Property:HasBudgetYear"},
+                    "end_date": {"@id": "Property:HasEndDate", "@type": "xsd:date"},
+                    "funding_type": {"@id": "Property:HasFundingType", "@type": "@id"},
+                    "funding_call": {"@id": "Property:HasFundingCall", "@type": "@id"},
+                    "funding": {"@id": "schema:funding", "@type": "@id"},
+                    "funding*": {"@id": "Property:HasFunding", "@type": "@id"},
+                    "funder": {"@id": "schema:funder", "@type": "@id"},
+                    "funder*": {"@id": "Property:HasFunder", "@type": "@id"},
+                    "member": {"@id": "schema:member", "@type": "@id"},
+                    "member*": {"@id": "Property:HasMember", "@type": "@id"},
+                    "member_of": {"@id": "schema:memberOf", "@type": "@id"},
+                    "member_of*": {"@id": "Property:IsMemberOf", "@type": "@id"},
+                    "other_documents": {
+                        "@id": "Property:HasAdditionalDocument",
+                        "@type": "@id",
+                    },
+                    "ou": {"@id": "Property:HasBusinessUnit", "@type": "@id"},
+                    "project_manager": {"@id": "Property:HasManager", "@type": "@id"},
+                    "project_status": {"@id": "Property:HasStatus", "@type": "@id"},
+                    "project_type": {"@id": "Property:HasType", "@type": "@id"},
+                    "proposal": {"@id": "Property:HasProposal", "@type": "@id"},
+                    "report": {"@id": "Property:HasReport", "@type": "@id"},
+                    "start_date": {"@id": "Property:HasStartDate", "@type": "xsd:date"},
+                    "subjects": {"@id": "Property:HasTopic", "@type": "@id"},
+                    "total_budget": {"@id": "Property:HasStatement"},
+                    "year": {"@id": "Property:HasYear"},
+                    "yearly_budget": {"@id": "Property:HasBudgetPart", "@type": "@id"},
+                    "yearly_budget_sum": {"@id": "Property:HasStatement"},
+                    "yearly_budget_sum_weighted": {"@id": "Property:HasStatement"},
+                    "probability_of_successful_funding": {
+                        "@id": "Property:HasStatement"
+                    },
+                },
+            ],
+            "uuid": "b2d7e6a2-eff9-4c82-b7f1-f2699d5b0ee3",
+            "title": "Project",
+            "title*": {"en": "Project", "de": "Projekt"},
+            "description": "An enterprise (potentially individual but typically collaborative), planned to achieve a particular aim.",
+            "description*": {
+                "de": "Ein (möglicherweise individuelles, in der Regel aber gemeinschaftliches) Unternehmen oder Unternehmung, das auf ein bestimmtes Ziel ausgerichtet ist."
+            },
+            "defaultProperties": [
+                "subjects",
+                "project_status",
+                "funding_type",
+                "funding_call",
+                "funder",
+                "funding",
+                "funding_name",
+                "ou",
+                "project_manager",
+                "member",
+                "member_of",
+                "start_date",
+                "end_date",
+                "total_budget",
+                "proposal",
+                "abstract",
+            ],
+        },
+    )
+    type: list[str] | None = ["Category:OSWb2d7e6a2eff94c82b7f1f2699d5b0ee3"]
+    subjects: list[str] | None = Field(
+        None, json_schema_extra={"title*": {"de": "Themen"}}, title="Subjects"
+    )
+    project_type: ProjectTypeDeprecated | None = Field(
+        "",
+        json_schema_extra={
+            "deprecated": True,
+            "title*": {"de": "Projekttyp (veraltet)"},
+            "description*": {"de": "Ersetzt mit Projekt- bzw. Förderart"},
+            "options": {
+                "enum_titles": ["House project", "Internal", "Public", "Industry"],
+                "enum_titles*": {
+                    "de": ["Hausprojekt", "Intern", "Öffentlich", "Industrie"]
+                },
+            },
+        },
+        title="Project type (deprecated)",
+    )
+    """
+    Replaced with Project / Funding Type
+    """
+    funding_type: ProjectType | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Projekt- bzw. Förderart"},
+            "range": "Category:OSW67f2ef61ba284c919fefa00d0e95a7a0",
+        },
+        title="Project / Funding Type",
+    )
+    project_status: ProjectStatus | None = Field(
+        default_factory=lambda: ProjectStatus.model_validate(
+            "Item:OSW55a9a9bda7b248759e48ae2e3ed6df1d"
+        ),
+        json_schema_extra={
+            "title*": {"de": "Projektstatus"},
+            "range": "Category:OSW490e38f9764f4408a244869a0ea98e7c",
+        },
+        title="Project status",
+    )
+    funding_call: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Förderaufruf"},
+            "options": {
+                "autocomplete": {
+                    "category": "Category:OSWd22af0aa3b00462a9da9b509538e8926"
+                }
+            },
+        },
+        title="Funding call",
+    )
+    funder: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Förder- bzw. Auftragsgeber"},
+            "category": "Category:OSW3cb8cef2225e403092f098f99bc4c472",
+        },
+        title="Funder",
+    )
+    funding: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Förderung"},
+            "description*": {"de": "Förderung oder Vertrag"},
+            "options": {
+                "autocomplete": {
+                    "category": "Category:OSWbe80b28aefd64921ba2e8e2d6225416e"
+                }
+            },
+        },
+        title="Funding",
+    )
+    """
+    Grant or contract
+    """
+    funding_name: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Förderung (Name)"},
+            "description*": {
+                "de": "Förderung oder Vertrag. Verwenden Sie diese Eigenschaft, um einen Text einzugeben, wenn Sie keine neue Instanz von Grant erstellen möchten."
+            },
+        },
+        title="Funding (name)",
+    )
+    """
+    Grant or contract. Use this property to enter a text if you don't want to create a new instance of grant.
+    """
+    probability_of_successful_funding: (
+        ProbabilityOfSuccessfulFundingInPercent | None
+    ) = Field(
+        None,
+        json_schema_extra={
+            "title*": {
+                "de": "Wahrscheinlichkeit einer erfolgreichen Förderung in Prozent"
+            },
+            "description*": {
+                "de": "Gibt die Wahrscheinlichkeit an, dass die Förderung genehmigt wird, bestimmt das gewichtete Budget"
+            },
+        },
+        title="Probability of Successful Funding in percent",
+    )
+    """
+    Indicates the likelihood that the funding will be approved, determines the weighted budget
+    """
+    ou: list[str] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"en": "OU", "de": "OE"},
+            "description*": {
+                "de": "Organisationseinheit (OE), die das Projekt durchführt"
+            },
+        },
+        title="OU",
+    )
+    """
+    Organizational Unit (OU), which carries out the project
+    """
+    project_manager: list[str] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"en": "Project Manager", "de": "Projektleiter*in"}
+        },
+        title="Project Manager",
+    )
+    member: list[str] | None = Field(
+        None,
+        json_schema_extra={"title*": {"en": "Member", "de": "Mitglieder*innen"}},
+        title="Member",
+    )
+    member_of: list[str] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"en": "Member of ", "de": "Mitglied von"},
+            "description*": {
+                "de": "Organisationseinheit(en), zu der das Projekt gehört, z. B. ein Projektcluster"
+            },
+        },
+        title="Member of",
+    )
+    """
+    Organizational unit(s), the project is a member of, e.g. a project cluster
+    """
+    start_date: date | None = Field(
+        None,
+        json_schema_extra={"title*": {"de": "Beginn"}, "options": {"flatpicker": {}}},
+        title="Start",
+    )
+    end_date: date | None = Field(
+        None,
+        json_schema_extra={"title*": {"de": "Ende"}, "options": {"flatpicker": {}}},
+        title="End",
+    )
+    total_budget: TotalBudget | None = Field(
+        None, json_schema_extra={"title*": {"de": "Budgetsumme"}}, title="Total Budget"
+    )
+    yearly_budget: list[YearlyBudget] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Jahresbudget"},
+            "options": {"disable_array_reorder": False, "enable_array_copy": True},
+        },
+        title="Yearly budget",
+    )
+    proposal: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Antrag"},
+            "options": {"upload": {}},
+            "links": [
+                {
+                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}&width=200&height=200{{/if}}",
+                    "mediaType": "image",
+                },
+                {
+                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}{{/if}}",
+                    "rel": "{{#if self}}download{{/if}}",
+                    "download": True,
+                },
+            ],
+        },
+        title="Proposal",
+    )
+    report: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Bericht"},
+            "options": {"upload": {}},
+            "links": [
+                {
+                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}&width=200&height=200{{/if}}",
+                    "mediaType": "image",
+                },
+                {
+                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}{{/if}}",
+                    "rel": "{{#if self}}download{{/if}}",
+                    "download": True,
+                },
+            ],
+        },
+        title="Report",
+    )
+    other_documents: list[str] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"en": "Additional documents", "de": "Sonstige Dokumente"}
+        },
+        title="Additional documents",
+    )
+    abstract: list[Description] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Kurzbeschreibung"},
+            "eval_template": {
+                "type": "mustache-wikitext",
+                "mode": "render",
+                "$comment": "Displays value according to user language with eng as fallback option. Note: {{=<% %>=}} changes mustache expression from {{..}} to <% %> for mixing with wikitext templates",
+                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%#abstract%> | {{#ifeq: <%lang%>|en|#default|<%lang%>}} = <%text%> <%/abstract%> }}",
+            },
+        },
+        title="Abstract",
+    )
+
+
+class Dataset(Data):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW2ac4493f8635481eaf1db961b63c8325?action=raw&slot=jsonschema",
+                {
+                    "url": "dcat:landingPage",
+                    "url*": "Property:HasUrl",
+                    "themes": {"@type": "@id", "@id": "dcat:theme"},
+                    "themes*": {"@type": "@id", "@id": "Property:IsRelatedTo"},
+                    "distributions": {
+                        "@type": "@id",
+                        "@id": "dcat:distribution",
+                        "@context": {
+                            "file": {"@id": "dcat:accessURL", "@type": "@id"},
+                            "file*": {
+                                "@id": "Property:HasFileAttachment",
+                                "@type": "@id",
+                            },
+                            "download_url": "dcat:downloadURL",
+                            "access_url": "dcat:accessURL",
+                            "media_type": "dcat:mediaType",
+                            "byte_size": "dcat:byteSize",
+                            "package_format": "dcat:packageFormat",
+                            "compression_format": "dcat:compressionFormat",
+                            "conforms_to": {
+                                "@id": "dcterms:conformsTo",
+                                "@type": "@id",
+                            },
+                            "table_schema": {"@id": "csvw:tableSchema", "@type": "@id"},
+                        },
+                    },
+                    "distributions*": {
+                        "@type": "@id",
+                        "@id": "Property:HasDistribution",
+                    },
+                    "data_format": "Property:HasDataFormat",
+                    "dataset_schema": "Property:HasDatasetSchema",
+                    "dcterms": "http://purl.org/dc/terms/",
+                    "prov": "http://www.w3.org/ns/prov#",
+                    "csvw": "http://www.w3.org/ns/csvw#",
+                    "parts": {"@id": "dcterms:hasPart", "@type": "@id"},
+                    "parts*": {"@id": "Property:HasPart", "@type": "@id"},
+                    "about": {"@id": "schema:about", "@type": "@id"},
+                    "generated_by": {"@id": "prov:wasGeneratedBy", "@type": "@id"},
+                },
+            ],
+            "title": "Dataset",
+            "defaultProperties": ["distributions", "themes", "about"],
+            "uuid": "fe729745-90fd-4e8b-a94c-d4e8366375e8",
+            "title*": {"en": "Dataset"},
+            "description": "",
+            "description*": {},
+        },
+    )
+    type: list[str] | None = ["Category:OSWfe72974590fd4e8ba94cd4e8366375e8"]
+    url: list[str] | None = Field(None, title="URL / Websites")
+    """
+    Landing page(s) that documents the dataset
+    """
+    themes: list[Entity] | None = Field(
+        None, json_schema_extra={"range": "Category:Entity"}, title="Themes / Topics"
+    )
+    """
+    Terms to categorizes this dataset
+    """
+    distributions: list[Distribution] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Distributionen"},
+            "description*": {
+                "de": "Serialisierungen dieses Datensatzes. Jeder Eintrag beschreibt eine Datei als Repräsentation dieses Datensatzes, sodass dieselbe Datei mehrere Datensätze mit unterschiedlichen Schemata bedienen kann."
+            },
+        },
+        title="Distributions",
+    )
+    """
+    Serializations of this dataset. Each entry describes one file as a representation of this dataset, so the same file can serve several datasets with different schemas.
+    """
+    data_format: list[DataFormat] | None = Field(
+        None,
+        json_schema_extra={"range": "Category:OSWccac243b31f94574847861e5d9685b82"},
+        min_length=1,
+        title="Data format",
+    )
+    """
+    Gives a structure to define specific formats of data.
+    """
+    dataset_schema: list[DatasetSchema] | None = Field(
+        None,
+        json_schema_extra={
+            "options": {"hidden": True},
+            "deprecated": True,
+            "description*": {"de": "Veraltet: Der Typ des Feldes data ist sein Schema"},
+            "range": "Category:OSW0d6584b3e2b64e9595733c4c3963c486",
+        },
+        title="Dataset schema",
+    )
+    """
+    Deprecated: the type of the data field is its schema
+    """
+    data: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Daten"},
+            "description*": {
+                "de": "Die Nutzdaten dieses Datensatzes. Ihr Typ ist ihr Schema, ein Unterschema schränkt sie also ein."
+            },
+        },
+        title="Data",
+    )
+    """
+    The payload of this dataset. Its type is its schema, so a subschema restricts it.
+    """
+    parts: list[Dataset] | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Teile"},
+            "description*": {"de": "Teildatensätze dieses Datensatzes"},
+            "range": "Category:OSWfe72974590fd4e8ba94cd4e8366375e8",
+        },
+        title="Parts",
+    )
+    """
+    Sub-datasets of this dataset
+    """
+    about: Entity | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Handelt von"},
+            "description*": {
+                "de": "Worum es in den Daten geht, z. B. die Probe oder das Gerät, von dem sie stammen"
+            },
+            "range": "Category:Entity",
+            "options": {
+                "autocomplete": {
+                    "$comment": "Any Item or Category",
+                    "query": "[[Item:%2B]]OR[[:Category:%2B]]",
+                }
+            },
+        },
+        title="About",
+    )
+    """
+    What the data is about, e. g. the sample or device it was taken from
+    """
+    generated_by: Process | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Erzeugt durch"},
+            "description*": {"de": "Der Prozess, der diesen Datensatz erzeugt hat"},
+            "range": "Category:OSWe5aa96bffb1c4d95be7fbd46142ad203",
+        },
+        title="Generated by",
+    )
+    """
+    The process that produced this dataset
+    """
+
+
+class OrganizationalSubUnit(OrganizationalUnit):
+    """
+    An organizational unit that explicitly is part of a larger organizational unit.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW3cb8cef2225e403092f098f99bc4c472?action=raw&slot=jsonschema"
+            ],
+            "title": "OrganizationalSubUnit",
+            "title*": {"de": "Organisationsuntereinheit"},
+            "description": "An organizational unit that explicitly is part of a larger organizational unit.",
+            "description*": {
+                "de": "Eine Organisationseinheit, die ausdrücklich Teil einer größeren Organisationseinheit ist."
+            },
+            "defaultProperties": ["superordinate_ou"],
+        },
+    )
+    type: list[str] | None = ["Category:OSWfe3e842b804445c7bb0dd8ee61da2d70"]
+
+
+class AdministrativeArea(Place):
+    """
+    A geographical region, typically under the jurisdiction of a particular government.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW28f71f2c20ad48c38c4e4d190a95c0b8?action=raw&slot=jsonschema"
+            ],
+            "uuid": "137e7443-b2b9-4692-bd59-a0e0a6778b70",
+            "title": "AdministrativeArea",
+            "title*": {"en": "Administrative Area", "de": "Verwaltungsbereich"},
+            "description": "A geographical region, typically under the jurisdiction of a particular government.",
+            "description*": {
+                "en": "A geographical region, typically under the jurisdiction of a particular government.",
+                "de": "Eine geografische Region, die in der Regel unter die Zuständigkeit einer bestimmten Regierung fällt.",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW137e7443b2b94692bd59a0e0a6778b70"]
+
+
+class Site(Location):
+    """
+    A site is a location or place where a particular event, activity, or object exists or is situated.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW3d238d05316e45a4ac95a11d7b24e36b?action=raw&slot=jsonschema"
+            ],
+            "title": "Site",
+            "title*": {"en": "Site", "de": "Standort"},
+            "uuid": "473d7a1e-d485-44d1-be83-b258b5810948",
+            "description": "A site is a location or place where a particular event, activity, or object exists or is situated.",
+            "description*": {
+                "de": "Ein Standort ist ein Ort oder ein Platz, an dem ein bestimmtes Ereignis, eine Aktivität oder ein Objekt existiert oder sich befindet."
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW473d7a1ed48544d1be83b258b5810948"]
+
+
+class DataTerm(DefinedTerm):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSWa5812d3b5119416c8da1606cbe7054eb?action=raw&slot=jsonschema"
+            ],
+            "title": "DataTerm",
+        },
+    )
+    type: list[str] | None = ["Category:OSW34f9d66c7e1241c8b9543231526f126d"]
+
+
+class Competence(DefinedTerm):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSWa5812d3b5119416c8da1606cbe7054eb?action=raw&slot=jsonschema"
+            ],
+            "uuid": "5eb9c52b-8045-44dc-870d-fd54ff434428",
+            "title": "Competence",
+            "title*": {"de": "Kompetenz"},
+        },
+    )
+    type: list[str] | None = ["Category:OSW5eb9c52b804544dc870dfd54ff434428"]
+
+
+class Topic(DefinedTerm):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSWa5812d3b5119416c8da1606cbe7054eb?action=raw&slot=jsonschema"
+            ],
+            "title": "Topic",
+        },
+    )
+    type: list[str] | None = ["Category:OSW5a13eeda5ed5405ea7ef62ea6feeceec"]
+
+
+class ProjectType(Enumeration):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSWd02741381aaa4709ae0753a0edc341ce?action=raw&slot=jsonschema"
+            ],
+            "uuid": "67f2ef61-ba28-4c91-9fef-a00d0e95a7a0",
+            "title": "ProjectType",
+            "title*": {"en": "Project Type", "de": "Projekttyp"},
+            "description": "",
+            "description*": {},
+        },
+    )
+    type: list[str] | None = ["Category:OSW67f2ef61ba284c919fefa00d0e95a7a0"]
+
+
+class StatusEnumeration(Enumeration):
+    """
+    Lists or enumerations dealing with status types.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSWd02741381aaa4709ae0753a0edc341ce?action=raw&slot=jsonschema"
+            ],
+            "uuid": "2c32802b-e590-4024-8c85-eda3479d484c",
+            "title": "StatusEnumeration",
+            "title*": {
+                "en": "Zustandsaufzählungen",
+                "de": "Aufzählung von Zustandsbeschreibungen",
+            },
+            "description": "Lists or enumerations dealing with status types.",
+            "description*": {
+                "en": "Lists or enumerations dealing with status types.",
+                "de": "Listen oder Aufzählungen, die sich mit Statusarten (Zustandsarten) befassen.",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW2c32802be59040248c85eda3479d484c"]
+
+
+class BudgetType(Enumeration):
+    """
+    Type of usage of a certain budget
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSWd02741381aaa4709ae0753a0edc341ce?action=raw&slot=jsonschema"
+            ],
+            "uuid": "595b282a-edf0-4878-8f3e-e326454792ce",
+            "title": "BudgetType",
+            "title*": {"en": "Budget Type", "de": "Budget-Typ"},
+            "description": "Type of usage of a certain budget",
+            "description*": {
+                "en": "Type of usage of a certain budget",
+                "de": "Art der Verwendung eines bestimmten Budgets",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW595b282aedf048788f3ee326454792ce"]
+
+
+class Country(AdministrativeArea):
+    """
+    A distinct part of the world, such as a state, nation, or other political entity
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
+            ],
+            "uuid": "0551abcd-6f73-4047-825e-3ded4c8a0ffe",
+            "title": "Country",
+            "title*": {"en": "Country", "de": "Land"},
+            "description": "A distinct part of the world, such as a state, nation, or other political entity",
+            "description*": {
+                "en": "A distinct part of the world, such as a state, nation, or other political entity",
+                "de": "Ein bestimmter Teil der Welt, z. B. ein Staat, eine Nation oder eine andere politische Einheit",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW0551abcd6f734047825e3ded4c8a0ffe"]
+
+
+class State(AdministrativeArea):
+    """
+    A state or province of a country.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
+            ],
+            "uuid": "ab60f9a2-2795-4ee0-be92-344ff6272420",
+            "title": "State",
+            "title*": {"en": "State", "de": "Staat"},
+            "description": "A state or province of a country.",
+            "description*": {
+                "en": "A state or province of a country.",
+                "de": "Ein Staat oder eine Provinz eines Landes.",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSWab60f9a227954ee0be92344ff6272420"]
+
+
+class Region(AdministrativeArea):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
+            ],
+            "uuid": "95efaf34-e2c7-439e-8e79-67233910e44b",
+            "title": "Region",
+            "title*": {"en": "Region", "de": "Region"},
+            "description": "",
+            "description*": {},
+        },
+    )
+    type: list[str] | None = ["Category:OSW95efaf34e2c7439e8e7967233910e44b"]
+
+
+class City(AdministrativeArea):
+    """
+    A city or town.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW137e7443b2b94692bd59a0e0a6778b70?action=raw&slot=jsonschema"
+            ],
+            "uuid": "807f1da5-b42e-42f2-96b2-13ab06ca873b",
+            "title": "City",
+            "title*": {"en": "Stadt"},
+            "description": "A city or town.",
+            "description*": {
+                "en": "A city or town.",
+                "de": "Eine Stadt oder ein Ort, im Sinne einer Gemeinde",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW807f1da5b42e42f296b213ab06ca873b"]
+
+
+class DataFormat(DataTerm):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "defaultProperties": [
+                "specification",
+                "description",
+                "label",
+                "short_name",
+            ],
+            "title": "DataFormat",
+        },
+    )
+    specification: str | None = Field(
+        None,
+        json_schema_extra={
+            "title*": {"de": "Spezifikation"},
+            "description*": {"de": "Entweder Text oder Link"},
+        },
+        title="Specification",
+    )
+    """
+    Either text or link
+    """
+    type: list[str] | None = ["Category:OSWccac243b31f94574847861e5d9685b82"]
+
+
+class ProjectStatus(StatusEnumeration):
+    """
+    Status for projects and project applications
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW2c32802be59040248c85eda3479d484c?action=raw&slot=jsonschema"
+            ],
+            "uuid": "490e38f9-764f-4408-a244-869a0ea98e7c",
+            "title": "ProjectStatus",
+            "title*": {
+                "en": "Project (Application) Status",
+                "de": "Projekt(antrags)status",
+            },
+            "description": "Status for projects and project applications",
+            "description*": {
+                "en": "Status for projects and project applications",
+                "de": "Status für Projekte und Projektanträge",
+            },
+        },
+    )
+    type: list[str] | None = ["Category:OSW490e38f9764f4408a244869a0ea98e7c"]
+
+
+# generated by datamodel-codegen:
+#   filename:  OSW0d6584b3e2b64e9595733c4c3963c486.json
+
+
+# generated by datamodel-codegen:
+#   filename:  OSWafcac83979f4472298b6acdc01981728.json
+
+
+class DigitalDocument(CreativeWork):
+    """
+    An electronic file or document.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "@context": [
+                "/wiki/Category:OSW712583f2479944deb2546b77cf860dda?action=raw&slot=jsonschema"
+            ],
+            "uuid": "afcac839-79f4-4722-98b6-acdc01981728",
+            "title": "DigitalDocument",
+            "title*": {"en": "Digital document"},
+            "description": "An electronic file or document.",
+            "description*": {"en": "An electronic file or document."},
+        },
+    )
+    type: list[str] | None = ["Category:OSWafcac83979f4472298b6acdc01981728"]
+
+
+# generated by datamodel-codegen:
+#   filename:  OSW34f9d66c7e1241c8b9543231526f126d.json
+
+
+# generated by datamodel-codegen:
+#   filename:  OSWccac243b31f94574847861e5d9685b82.json
+
+
+# generated by datamodel-codegen:
+#   filename:  OSW3d238d05316e45a4ac95a11d7b24e36b.json
+
+
+# generated by datamodel-codegen:
+#   filename:  OSW28f71f2c20ad48c38c4e4d190a95c0b8.json
+
+
+# generated by datamodel-codegen:
+#   filename:  OSW473d7a1ed48544d1be83b258b5810948.json
+
+
+# generated by datamodel-codegen:
+#   filename:  OSW4bcd4a99a73f482ea40ac4210dfab836.json
+
+
+class BuildingFunction(Item):
+    model_config = ConfigDict(
+        json_schema_extra={"title": "BuildingFunction"},
+    )
+    type: list[str] | None = ["Category:OSW07a0faef5be94b788514a2dd5dca20bf"]
 
 
 class AreaUsageType(Item):
@@ -2721,80 +4321,6 @@ class User(Person, UserAccount):
     type: list[str] | None = ["Category:OSWd9aa0bca9b0040d8af6f5c091bf9eec7"]
 
 
-class OrganizationalSubUnit(OrganizationalUnit):
-    """
-    An organizational unit that explicitly is part of a larger organizational unit.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW3cb8cef2225e403092f098f99bc4c472?action=raw&slot=jsonschema"
-            ],
-            "title": "OrganizationalSubUnit",
-            "title*": {"de": "Organisationsuntereinheit"},
-            "description": "An organizational unit that explicitly is part of a larger organizational unit.",
-            "description*": {
-                "de": "Eine Organisationseinheit, die ausdrücklich Teil einer größeren Organisationseinheit ist."
-            },
-            "defaultProperties": ["superordinate_ou"],
-        },
-    )
-    type: list[str] | None = ["Category:OSWfe3e842b804445c7bb0dd8ee61da2d70"]
-
-
-class Competence(DefinedTerm):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSWa5812d3b5119416c8da1606cbe7054eb?action=raw&slot=jsonschema"
-            ],
-            "uuid": "5eb9c52b-8045-44dc-870d-fd54ff434428",
-            "title": "Competence",
-            "title*": {"de": "Kompetenz"},
-        },
-    )
-    type: list[str] | None = ["Category:OSW5eb9c52b804544dc870dfd54ff434428"]
-
-
-class Topic(DefinedTerm):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSWa5812d3b5119416c8da1606cbe7054eb?action=raw&slot=jsonschema"
-            ],
-            "title": "Topic",
-        },
-    )
-    type: list[str] | None = ["Category:OSW5a13eeda5ed5405ea7ef62ea6feeceec"]
-
-
-class StatusEnumeration(Enumeration):
-    """
-    Lists or enumerations dealing with status types.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSWd02741381aaa4709ae0753a0edc341ce?action=raw&slot=jsonschema"
-            ],
-            "uuid": "2c32802b-e590-4024-8c85-eda3479d484c",
-            "title": "StatusEnumeration",
-            "title*": {
-                "en": "Zustandsaufzählungen",
-                "de": "Aufzählung von Zustandsbeschreibungen",
-            },
-            "description": "Lists or enumerations dealing with status types.",
-            "description*": {
-                "en": "Lists or enumerations dealing with status types.",
-                "de": "Listen oder Aufzählungen, die sich mit Statusarten (Zustandsarten) befassen.",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW2c32802be59040248c85eda3479d484c"]
-
-
 class EmploymentStatus(StatusEnumeration):
     """
     Describes the status of an employment (contract)
@@ -2906,94 +4432,6 @@ class Supply(OswBaseModel):
     """
     Link to the article in the online catalogue of the supplier
     """
-
-
-class Quantity(OswBaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": {
-                "Property": "https://wiki-dev.open-semantic-lab.org/id/Property-3A",
-                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-                "quantity*": "Property:HasProperty",
-                "quantity": "rdf:predicate",
-                "value*": "Property:HasObject",
-                "value": "rdf:object",
-                "unit": "Property:HasUnit",
-            },
-            "$comment": "A reduced version of JsonSchema:Statement",
-            "title": "Quantity",
-            "title*": {"de": "Menge"},
-            "_headerTemplate": "{{self.value}}",
-        },
-    )
-    uuid: UUID = Field(
-        ..., json_schema_extra={"options": {"hidden": True}}, title="UUID"
-    )
-    quantity: str = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "Attribut"},
-            "propertyOrder": 10,
-            "options": {
-                "grid_columns": 8,
-                "autocomplete": {"category": "Category:QuantityProperty"},
-            },
-        },
-        title="Property",
-    )
-    numerical_value: str = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "Wert"},
-            "propertyOrder": 20,
-            "options": {"grid_columns": 2},
-        },
-        title="Value",
-    )
-    unit: str = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "Einheit"},
-            "propertyOrder": 30,
-            "watch": {
-                "quantity": "statement.quantity",
-                "unit_symbol": "statement.unit_symbol",
-            },
-            "options": {
-                "grid_columns": 2,
-                "autocomplete": {
-                    "query": "[[-HasInputUnit::{{$(quantity)}}]][[Display_title_of::like:*{{_user_input}}*]]|?Display_title_of=label",
-                    "render_template": {
-                        "type": ["handlebars"],
-                        "value": "{{result.printouts.label.[0]}}",
-                    },
-                    "field_maps": [
-                        {
-                            "source_path": "$",
-                            "template": "{{{result.printouts.label.[0]}}}",
-                            "target_path": "$(unit_symbol)",
-                        }
-                    ],
-                },
-            },
-        },
-        title="Unit",
-    )
-    unit_symbol: str = Field(..., json_schema_extra={"options": {"hidden": True}})
-    value: str = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "Wert"},
-            "watch": {
-                "numerical_value": "statement.numerical_value",
-                "unit_symbol": "statement.unit_symbol",
-            },
-            "template": "{{{numerical_value}}} {{{unit_symbol}}}",
-            "options": {"hidden": True},
-        },
-        title="Value",
-    )
 
 
 class Attribute(OswBaseModel):
@@ -3511,1180 +4949,6 @@ class DeviceType(PhysicalItemType):
 #   filename:  OSWf0fe562f422d49c6877490b3dfee2f3f.json
 
 
-class Status(str, Enum):
-    Item_OSWaa8d29404288446a9f3ec7afa4e2a512 = (
-        "Item:OSWaa8d29404288446a9f3ec7afa4e2a512"
-    )
-    """
-    To do
-    """
-    Item_OSWa2b4567ad4874ea1b9adfed19a3d06d1 = (
-        "Item:OSWa2b4567ad4874ea1b9adfed19a3d06d1"
-    )
-    """
-    In work
-    """
-    Item_OSWf474ec34b7df451ea8356134241aef8a = (
-        "Item:OSWf474ec34b7df451ea8356134241aef8a"
-    )
-    """
-    Done
-    """
-
-
-class ProjectTypeDeprecated(str, Enum):
-    """
-    Replaced with Project / Funding Type
-    """
-
-    house_project = "house_project"
-    """
-    House project
-    """
-    internal = "internal"
-    """
-    Internal
-    """
-    public = "public"
-    """
-    Public
-    """
-    industry = "industry"
-    """
-    Industry
-    """
-
-
-class ProbabilityOfSuccessfulFundingInPercent(Quantity):
-    """
-    Indicates the likelihood that the funding will be approved, determines the weighted budget
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "Probability of Successful Funding in percent",
-            "title*": {
-                "de": "Wahrscheinlichkeit einer erfolgreichen Förderung in Prozent"
-            },
-            "description": "Indicates the likelihood that the funding will be approved, determines the weighted budget",
-            "description*": {
-                "de": "Gibt die Wahrscheinlichkeit an, dass die Förderung genehmigt wird, bestimmt das gewichtete Budget"
-            },
-        },
-    )
-    quantity: str | None = Field(
-        "Property:HasProbabilityOfSuccessfulFunding",
-        json_schema_extra={"options": {"hidden": True}},
-    )
-    unit: str | None = Field(
-        "Property:HasDimensionlessRatio#OSW8b3dc9b793074afc8ab8b03041f97f16",
-        json_schema_extra={"readOnly": True},
-    )
-
-
-class TotalBudget(Quantity):
-    model_config = ConfigDict(
-        json_schema_extra={"title": "Total Budget", "title*": {"de": "Budgetsumme"}},
-    )
-    quantity: str | None = Field(
-        "Property:HasBudget", json_schema_extra={"options": {"hidden": True}}
-    )
-    unit: str | None = Field(
-        None, json_schema_extra={"title*": {"de": "Währung"}}, title="Currency"
-    )
-
-
-class YearlyBudgetSum(Quantity):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "Yearly Budget Sum",
-            "title*": {"de": "Summe Jahresbudget"},
-            "options": {
-                "disable_collapse": True,
-                "disable_properties": True,
-                "compact": True,
-            },
-        },
-    )
-    quantity: str | None = Field(
-        "Property:HasBudget", json_schema_extra={"options": {"hidden": True}}
-    )
-    numerical_value: str | None = Field(
-        None, json_schema_extra={"options": {"grid_columns": 6}}
-    )
-    unit: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Währung"},
-            "propertyOrder": 1001,
-            "options": {"grid_columns": 6},
-        },
-        title="Currency",
-    )
-
-
-class WeightedSum(OswBaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "weighted sum",
-            "title*": {"de": "Gewichtete Summe"},
-            "_description": "weighted with probability of successful funding",
-            "_description*": {"de": "gewichtet mit Erfolgswahrscheinlichkeit"},
-            "options": {
-                "disable_collapse": True,
-                "disable_properties": True,
-                "compact": True,
-            },
-        },
-    )
-    uuid: UUID = Field(
-        ..., json_schema_extra={"options": {"hidden": True}}, title="UUID"
-    )
-    quantity: str | None = Field(
-        "Property:HasWeightedBudget", json_schema_extra={"options": {"hidden": True}}
-    )
-    numerical_value: str = Field(
-        ...,
-        json_schema_extra={
-            "_format": "template",
-            "options": {
-                "grid_columns": 12,
-                "hidden": True,
-                "dynamic_template": {"override": "always"},
-            },
-            "watch": {
-                "probability_of_successful_funding": "probability_of_successful_funding.numerical_value",
-                "yearly_budget_sum_value": "yearly_budget.yearly_budget_sum.numerical_value",
-            },
-            "dynamic_template": "{{#calc 0.01 '*'}}{{#calc probability_of_successful_funding '*'}}{{yearly_budget_sum_value}}{{/calc}}{{/calc}}",
-        },
-    )
-    value: str = Field(
-        ...,
-        json_schema_extra={
-            "_format": "template",
-            "options": {"grid_columns": 12, "hidden": False},
-            "_watch": {
-                "probability_of_successful_funding": "probability_of_successful_funding.numerical_value",
-                "yearly_budget_sum_value": "yearly_budget.yearly_budget_sum.numerical_value",
-                "yearly_budget_sum_unit_symbol": "yearly_budget.yearly_budget_sum.unit_symbol",
-            },
-            "watch": {
-                "numerical_value": "statement.numerical_value",
-                "unit_symbol": "statement.unit_symbol",
-            },
-            "template": "{{{numerical_value}}} {{{unit_symbol}}}",
-        },
-        title="Wert",
-    )
-    unit: str = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "Währung"},
-            "_format": "template",
-            "propertyOrder": 1001,
-            "options": {"grid_columns": 6, "hidden": True},
-            "watch": {"yearly_budget_sum_unit": "yearly_budget.yearly_budget_sum.unit"},
-            "template": "{{yearly_budget_sum_unit}}",
-        },
-        title="Currency",
-    )
-    unit_symbol: str = Field(
-        ...,
-        json_schema_extra={
-            "watch": {
-                "yearly_budget_sum_unit_symbol": "yearly_budget.yearly_budget_sum.unit_symbol"
-            },
-            "template": "{{yearly_budget_sum_unit_symbol}}",
-            "options": {"grid_columns": 6, "hidden": True},
-        },
-    )
-
-
-class Component(OswBaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "Component",
-            "title*": {"de": "Komponente"},
-            "headerTemplate": "{{ i1 }} - {{ self.component_id }}",
-            "defaultProperties": [],
-        },
-    )
-    uuid: UUID = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "UUID"},
-            "$comment": "format uuid field are copied, if not set in copy_ignore",
-            "_template": "dynamic_template",
-            "dynamic_template": "{{_uuid_}}",
-            "options": {"hidden": True, "dynamic_template": {"override": "empty"}},
-        },
-        title="UUID",
-    )
-    component_id: str = Field(
-        ...,
-        json_schema_extra={
-            "$comment": "Will be used as a visual reference for the user",
-            "title*": {"de": "ID"},
-            "description*": {"de": "Wird automatisch generiert"},
-            "dynamic_template": "Component{{patternformat '00' _array_index_}}",
-            "readOnly": True,
-            "options": {
-                "hidden": True,
-                "dynamic_template": {"override": "always"},
-                "grid_columns": 6,
-            },
-            "propertyOrder": 10,
-        },
-        title="ID",
-    )
-    """
-    Automatically generated
-    """
-    label: list[Label] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Bezeichnung"},
-            "description*": {
-                "de": "Bezeichnung der Funktion oder Rolle der Komponente in diesem spezifischen Kontext."
-            },
-            "eval_template": {
-                "type": "mustache-wikitext",
-                "mode": "render",
-                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#label}} |{{lang}}={{text}} {{/label}} {{=<% %>=}} }}",
-            },
-            "options": {"grid_columns": 12},
-            "propertyOrder": 20,
-        },
-        title="Label",
-    )
-    """
-    Designation of the function or role of the component in this specific context.
-    """
-    description: list[Description] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Beschreibung"},
-            "description*": {
-                "de": "Optional, zusätzliche Angaben zur Rolle oder Funktion der Komponente in diesem spezifischen Kontext."
-            },
-            "eval_template": {
-                "type": "mustache-wikitext",
-                "mode": "render",
-                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#description}} |{{lang}}={{text}} {{/description}} {{=<% %>=}} }}",
-            },
-            "options": {"grid_columns": 12},
-            "propertyOrder": 30,
-        },
-        title="Description",
-    )
-    """
-    Optional, additional details on the role or function of the component in this specific context.
-    """
-    component_type: Category | None = Field(
-        default_factory=lambda: Category.model_validate(
-            "Category:OSWe427aafafbac4262955b9f690a83405d"
-        ),
-        json_schema_extra={
-            "title*": {"de": "Typ der Komponente"},
-            "range": "Category:Category",
-            "options": {
-                "autocomplete": {
-                    "$comment": "Tool",
-                    "query": "[[:Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]",
-                },
-                "grid_columns": 12,
-            },
-            "propertyOrder": 40,
-            "x-oold-required-iri": True,
-        },
-        title="Component type",
-    )
-    component_instance_property: str | None = Field(
-        "Property:HasPart", json_schema_extra={"options": {"hidden": True}}
-    )
-    component_instance: Tool | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Instanz"},
-            "range": "Category:OSWe427aafafbac4262955b9f690a83405d",
-            "watch": {"component_type_": "component.component_type"},
-            "options": {
-                "autocomplete": {
-                    "query": "[[HasType::$(component_type_)]]|?Display_title_of=label|?HasImage=image|?HasDescription=description"
-                },
-                "grid_columns": 12,
-            },
-            "propertyOrder": 50,
-            "x-oold-required-iri": True,
-        },
-        title="Instance",
-    )
-
-
-class InitialOccupantOfTheSlot(OswBaseModel):
-    """
-    Tool or component installed in the slot.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "Initial occupant of the slot",
-            "title*": {"de": "Initiale Belegung des Slots"},
-            "description": "Tool or component installed in the slot.",
-            "description*": {"de": "Im Slot installiertes Werkzeug oder Komponente."},
-            "defaultProperties": ["slot_occupant_type"],
-            "options": {"grid_columns": 12},
-            "propertyOrder": 60,
-        },
-    )
-    slot_occupant_type: Category | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Typ"},
-            "range": "Category:Category",
-            "watch": {"slot_type": "slot.slot_type_restriction"},
-            "options": {
-                "autocomplete": {
-                    "$comment": "Tool",
-                    "query": "[[:$(slot_type)]]OR[[SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf.SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf::$(slot_type)]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf.SubClassOf::$(slot_type)]]",
-                }
-            },
-            "propertyOrder": 11,
-        },
-        title="Type",
-    )
-    slot_occupant_instance_property: str | None = Field(
-        "Property:HasOccupant", json_schema_extra={"options": {"hidden": True}}
-    )
-    slot_occupant_instance: Tool | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Instanz"},
-            "range": "Category:OSWe427aafafbac4262955b9f690a83405d",
-            "watch": {"slot_occupant_type_": "slot_occupant.slot_occupant_type"},
-            "options": {
-                "autocomplete": {
-                    "query": "[[HasType::$(slot_occupant_type_)]]|?Display_title_of=label|?HasImage=image|?HasDescription=description"
-                }
-            },
-            "propertyOrder": 21,
-            "x-oold-required-iri": True,
-        },
-        title="Instance",
-    )
-
-
-class Slot(OswBaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "Slot",
-            "title*": {"de": "Slot"},
-            "headerTemplate": "{{ i1 }} - {{ self.slot_id }}",
-            "defaultProperties": ["name", "description", "slot_occupant"],
-        },
-    )
-    uuid: str = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "UUID"},
-            "$comment": "format uuid field are copied, if not set in copy_ignore",
-            "_format": "uuid",
-            "_template": "dynamic_template",
-            "dynamic_template": "{{_uuid_}}",
-            "options": {"hidden": True, "dynamic_template": {"override": "empty"}},
-        },
-        title="UUID",
-    )
-    slot_osw_id: str = Field(
-        ...,
-        json_schema_extra={
-            "$comment": "Will be used an unique reference for slot exchange events.",
-            "title*": {"de": "OSW-ID"},
-            "watch": {"_own_uuid": "slot.uuid"},
-            "_format": "dynamic_template",
-            "dynamic_template": "{{_current_subject_}}#OSW{{#replace '-' ''}}{{_own_uuid}}{{/replace}}",
-            "readOnly": True,
-            "options": {"hidden": True, "dynamic_template": {"override": "empty"}},
-        },
-        title="OSW-ID",
-    )
-    slot_id: str = Field(
-        ...,
-        json_schema_extra={
-            "$comment": "Will be used as a visual reference for the user",
-            "title*": {"de": "ID"},
-            "description*": {"de": "Wird automatisch generiert"},
-            "dynamic_template": "Slot{{patternformat '00' _array_index_}}",
-            "readOnly": True,
-            "options": {
-                "hidden": True,
-                "dynamic_template": {"override": "always"},
-                "grid_columns": 6,
-            },
-            "propertyOrder": 10,
-        },
-        title="ID",
-    )
-    """
-    Automatically generated
-    """
-    name: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Name"},
-            "options": {"grid_columns": 6},
-            "propertyOrder": 20,
-        },
-        title="Name",
-    )
-    description: list[Description] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Beschreibung"},
-            "eval_template": {
-                "type": "mustache-wikitext",
-                "mode": "render",
-                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%={{ }}=%> {{#description}} |{{lang}}={{text}} {{/description}} {{=<% %>=}} }}",
-            },
-            "options": {"grid_columns": 12},
-            "propertyOrder": 30,
-        },
-        title="Description",
-    )
-    slot_init_date_time: AwareDatetime = Field(
-        ...,
-        json_schema_extra={
-            "title*": {"de": "Datum der Slot-Initialisierung"},
-            "dynamic_template": "{{_now_}}",
-            "options": {"dynamic_template": {"override": "empty"}, "grid_columns": 4},
-            "propertyOrder": 21,
-        },
-        title="Date of slot initialization",
-    )
-    slot_type_restriction: Category | None = Field(
-        default_factory=lambda: Category.model_validate(
-            "Category:OSWe427aafafbac4262955b9f690a83405d"
-        ),
-        json_schema_extra={
-            "title*": {"de": "Typeinschränkung des Slots"},
-            "range": "Category:Category",
-            "options": {
-                "autocomplete": {
-                    "$comment": "Tool",
-                    "query": "[[:Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]OR[[SubClassOf.SubClassOf.SubClassOf.SubClassOf.SubClassOf::Category:OSWe427aafafbac4262955b9f690a83405d]]",
-                }
-            },
-            "propertyOrder": 50,
-            "x-oold-required-iri": True,
-        },
-        title="Type restriction of the slot",
-    )
-    slot_occupant: InitialOccupantOfTheSlot | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Initiale Belegung des Slots"},
-            "description*": {"de": "Im Slot installiertes Werkzeug oder Komponente."},
-            "defaultProperties": ["slot_occupant_type"],
-            "options": {"grid_columns": 12},
-            "propertyOrder": 60,
-        },
-        title="Initial occupant of the slot",
-    )
-    """
-    Tool or component installed in the slot.
-    """
-
-
-class YearlyBudget(OswBaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "title": "Yearly budget",
-            "title*": {"de": "Jahresbudget"},
-            "defaultProperties": [
-                "budget_year",
-                "yearly_budget_sum",
-                "budget_type",
-                "budget_ou",
-            ],
-        },
-    )
-    uuid: UUID = Field(
-        ..., json_schema_extra={"options": {"hidden": True}}, title="UUID"
-    )
-    budget_year: str | None = Field(
-        None, json_schema_extra={"title*": {"de": "Jahr"}}, title="Year"
-    )
-    yearly_budget_sum: YearlyBudgetSum | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Summe Jahresbudget"},
-            "options": {
-                "disable_collapse": True,
-                "disable_properties": True,
-                "compact": True,
-            },
-        },
-        title="Yearly Budget Sum",
-    )
-    yearly_budget_sum_weighted: WeightedSum | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Gewichtete Summe"},
-            "_description": "weighted with probability of successful funding",
-            "_description*": {"de": "gewichtet mit Erfolgswahrscheinlichkeit"},
-            "options": {
-                "disable_collapse": True,
-                "disable_properties": True,
-                "compact": True,
-            },
-        },
-        title="weighted sum",
-    )
-    budget_start: date | None = Field(
-        None, json_schema_extra={"title*": {"de": "Beginn"}}, title="Start"
-    )
-    budget_end: date | None = Field(
-        None, json_schema_extra={"title*": {"de": "Ende"}}, title="End"
-    )
-    budget_ou: OrganizationalUnit | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"en": "OU", "de": "OE"},
-            "range": "Category:OSW3cb8cef2225e403092f098f99bc4c472",
-        },
-        title="OU",
-    )
-    budget_type: BudgetType | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Typ"},
-            "range": "Category:OSW595b282aedf048788f3ee326454792ce",
-        },
-        title="Type",
-    )
-
-
-class Tool(Item):
-    """
-    Item that participates as a utility (almost) unchanged in a process
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:Item?action=raw&slot=jsonschema",
-                {
-                    "components": {
-                        "@id": "Property:HasStatement",
-                        "@type": "@id",
-                        "@context": {
-                            "component_instance_property": {
-                                "@id": "Property:HasProperty",
-                                "@type": "@id",
-                            },
-                            "component_instance": {
-                                "@id": "Property:HasObject",
-                                "@type": "@id",
-                            },
-                        },
-                    },
-                    "events": {"@id": "Property:HasEvent", "@type": "@id"},
-                    "purposes": {"@id": "Property:HasPurpose", "@type": "xsd:string"},
-                    "slots": {
-                        "@id": "Property:HasSlot",
-                        "@type": "@id",
-                        "@context": {
-                            "slot_osw_id": {
-                                "@id": "Property:HasOswId",
-                                "@type": "xsd:string",
-                            },
-                            "slot_id": {"@id": "Property:HasId", "@type": "xsd:string"},
-                            "name": {"@id": "Property:HasName", "@type": "xsd:string"},
-                            "description": {
-                                "@id": "Property:HasDescription",
-                                "@type": "@id",
-                            },
-                            "slot_init_date_time": {
-                                "@id": "Property:HasInitDate",
-                                "@type": "xsd:dateTime",
-                            },
-                            "slot_occupant": {
-                                "@id": "Property:HasStatement",
-                                "@type": "@id",
-                                "@context": {
-                                    "slot_occupant_instance_property": "Property:HasProperty",
-                                    "slot_occupant_instance": "Property:HasObject",
-                                },
-                            },
-                            "slot_type_restriction": {
-                                "@id": "Property:HasTypeRestriction",
-                                "@type": "@id",
-                            },
-                        },
-                    },
-                    "typical_process": {
-                        "@id": "Property:HasTypicalProcess",
-                        "@type": "@id",
-                    },
-                },
-            ],
-            "uuid": "e427aafa-fbac-4262-955b-9f690a83405d",
-            "title": "Tool",
-            "title*": {"en": "Tool", "de": "Werkzeug"},
-            "description": "Item that participates as a utility (almost) unchanged in a process",
-            "description*": {
-                "en": "Item that participates as a utility (almost) unchanged in a process",
-                "de": "Gegenstand der als Hilfsmittel (nahezu) unverändert in einem Prozess teilnimmt",
-            },
-            "defaultProperties": [],
-        },
-    )
-    type: list[str] | None = ["Category:OSWe427aafafbac4262955b9f690a83405d"]
-    purposes: list[str] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Zweck(e)"},
-            "eval_template": [
-                {
-                    "type": "mustache-wikitext",
-                    "mode": "render",
-                    "value": "{{=<% %>=}} <ul><%#purposes%><li><%.%></li><%/purposes%></ul>",
-                }
-            ],
-        },
-        title="Purpose(s)",
-    )
-    typical_process: list[Category] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Typische(r) Prozess(e)"},
-            "eval_template": [
-                {
-                    "type": "mustache-wikitext",
-                    "mode": "render",
-                    "value": "{{=<% %>=}} <ul><%#typical_process%><li>[[:<%.%>]]</li><%/typical_process%></ul>",
-                }
-            ],
-            "range": "Category:Category",
-        },
-        title="Typical Process(es)",
-    )
-    components: list[Component] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Komponenten"},
-            "description*": {
-                "de": "Komponenten sind dauerhafte Teile eines Werkzeugs (im Gegensatz zu Slots für austauschbare Teile)."
-            },
-            "options": {
-                "enable_array_copy": True,
-                "array_copy_ignore": ["uuid", "component_id", "attachments"],
-            },
-            "eval_template": [
-                {
-                    "type": "mustache-wikitext",
-                    "mode": "render",
-                    "value": "{{=<% %>=}} <ul><%#components%><li>[[<%component_instance%>]] ({{#switch:{{USERLANGUAGECODE}}|en=Type|de=Typ|#default=Type}}: {{#ask:[[<%component_instance%>]]|?HasType=|format=plain|mainlabel=-}})</li><%/components%></ul>",
-                }
-            ],
-        },
-        title="Components",
-    )
-    """
-    Component are permanent parts of a tool (vs. Slots for exchangeable parts).
-    """
-    slots: list[Slot] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Slot-Konfiguration"},
-            "description*": {
-                "de": "Slots stellen Plätze für austauschbare Teile oder Komponenten eines Werkzeugs dar (im Gegensatz zu Komponenten, die permanente Teile sind). Slot-Austauschereignisse können verwendet werden, um Änderungen an Slots zu dokumentieren. Dies ist die anfängliche Slot-Konfiguration!"
-            },
-            "options": {
-                "enable_array_copy": True,
-                "array_copy_ignore": ["uuid", "slot_osw_id", "slot_id", "attachments"],
-            },
-            "eval_template": [
-                {
-                    "type": "mustache-wikitext",
-                    "mode": "render",
-                    "value": "{{=<% %>=}} <ul> <%#slots%> <li> {{Viewer/Link |page=<%slot_osw_id%>}}: {{#if: <!-- if there's at least one ToolMaintenanceEvent-->{{#ask: [[Category:OSW5433f882b9f14dca81994e058c8ab4a0]][[HasTarget::{{FULLPAGENAME}}]][[HasAction.HasSlot::<%slot_osw_id%>]]|sort=HasEndDate|order=desc|format=plain|link=none|limit=1|searchlabel=}}<!-- use the action of the latest ToolMaintenanceEvent-->|{{#ask:[[-HasAction.HasType::Category:OSW5433f882b9f14dca81994e058c8ab4a0]][[HasSlot::<%slot_osw_id%>]]<!-- same query as above-->[[-HasAction::{{#ask: [[Category:OSW5433f882b9f14dca81994e058c8ab4a0]][[HasTarget::{{FULLPAGENAME}}]][[HasAction.HasSlot::<%slot_osw_id%>]]|sort=HasEndDate|order=desc|format=plain|link=none|limit=1|searchlabel=}}]] <!-- -->|?HasOccupant=|format=plain|mainlabel=-|default={{#switch:{{USERLANGUAGECODE}}|de=Keine Belegung|#default=No occupant}} }} <!-- else use the default occupant-->|{{#ask: [[<%slot_osw_id%>]]|?HasOccupant=|format=plain|sort=HasInitDate|order=desc|limit=1|searchlabel=|mainlabel=-|default={{#switch:{{USERLANGUAGECODE}}|de=Keine Belegung|#default=No occupant}}}} }} </li> <%/slots%> </ul>",
-                }
-            ],
-        },
-        title="Slot configuration",
-    )
-    """
-    Slots represent spaces for exchangable parts or components of a tool (vs. Components, which are permanent parts). Slot exchange events can be used to document changes on slots. This is the initial slot configuration!
-    """
-    events: list[Event] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Ereignis(se)"},
-            "range": "Category:OSWb97757b46edb430591758662c18d354d",
-        },
-        title="Event(s)",
-    )
-
-
-class Process(Item):
-    """
-    Members of the Process Category describe the act of changing the state or properties of something
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:Item?action=raw&slot=jsonschema",
-                {
-                    "type": {"@id": "Property:HasType", "@type": "@id"},
-                    "type*": {"@id": "Property:HasSchema", "@type": "@id"},
-                    "tool": {"@id": "Property:HasTool", "@type": "@id"},
-                    "input": {"@id": "Property:HasInput", "@type": "@id"},
-                    "location": {"@id": "Property:HasLocation", "@type": "@id"},
-                    "location_name": {"@id": "Property:HasLocation", "@type": "@id"},
-                    "output": {"@id": "Property:HasOutput", "@type": "@id"},
-                    "creator": {"@id": "Property:HasCreator", "@type": "@id"},
-                    "actionees": {"@id": "Property:HasActionee", "@type": "@id"},
-                    "projects": {"@id": "Property:HasProject", "@type": "@id"},
-                    "status": {"@id": "Property:HasStatus", "@type": "@id"},
-                    "start_date_time": {
-                        "@id": "Property:HasStartDateAndTime",
-                        "@type": "xsd:dateTime",
-                    },
-                    "duration": {"@id": "Property:HasDuration"},
-                    "end_date_time": {
-                        "@id": "Property:HasEndDateAndTime",
-                        "@type": "xsd:dateTime",
-                    },
-                    "subprocesses": {"@id": "Property:HasPart", "@type": "@id"},
-                },
-            ],
-            "title": "Process",
-            "title*": {"en": "Process", "de": "Prozess"},
-            "uuid": "5a07d666-c55b-4ffa-89d4-9633c708029d",
-            "description": "Members of the Process Category describe the act of changing the state or properties of something",
-            "description*": {
-                "en": "Members of the Process Category describe the act of changing the state or properties of something",
-                "de": "Prozesse beschreiben den Akt des Änderns eines Zustandes oder der Eigenschaften von etwas.",
-            },
-            "defaultProperties": [
-                "actionees",
-                "start_date_time",
-                "tool",
-                "input",
-                "output",
-            ],
-        },
-    )
-    type: list[str] | None = ["Category:OSWe5aa96bffb1c4d95be7fbd46142ad203"]
-    creator: Person | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Ersteller"},
-            "range": "Category:OSW44deaa5b806d41a2a88594f562b110e9",
-        },
-        title="Creator",
-    )
-    actionees: list[Person] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Akteure"},
-            "range": "Category:OSW44deaa5b806d41a2a88594f562b110e9",
-        },
-        title="Actionees",
-    )
-    start_date_time: AwareDatetime | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Startzeitpunkt"},
-            "$comment": 'Note: To hide the time, you can set {"options":  {"flatpickr": {"dateFormat": "Z", "altInput": true, "altFormat": "Y-m-d"}}}',
-        },
-        title="Start time",
-    )
-    duration: timedelta | None = Field(
-        None, json_schema_extra={"title*": {"de": "Dauer"}}, title="Duration"
-    )
-    end_date_time: AwareDatetime | None = Field(
-        None, json_schema_extra={"title*": {"de": "Endzeitpunkt"}}, title="End time"
-    )
-    location: Location | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Ort"},
-            "range": "Category:OSW3d238d05316e45a4ac95a11d7b24e36b",
-        },
-        title="Location",
-    )
-    location_name: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Ort (Text)"},
-            "description*": {
-                "de": "Vorzugsweise sollte ein Ort aus dem Autocomplete-Feld 'Ort' ausgewählt oder erstellt werden."
-            },
-        },
-        title="Location (text)",
-    )
-    """
-    Its prefered to select or create a location from or in the autocomplete field 'Location'.
-    """
-    status: Status | None = Field(
-        None,
-        json_schema_extra={
-            "_format": "autocomplete",
-            "options": {
-                "_autocomplete": {
-                    "category": "Category:OSW9725d7a91bab4f1aa68f423e4e9bfcf4"
-                },
-                "enum_titles": ["To do", "In work", "Done"],
-                "enum_titles*": {"de": ["Zu tun", "In Arbeit", "Erledigt"]},
-                "grid_columns": 6,
-            },
-        },
-        title="Status",
-    )
-    tool: list[Tool] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Werkzeuge"},
-            "options": {"conditional_visible": {"modes": ["query", "default"]}},
-            "range": "Category:OSWe427aafafbac4262955b9f690a83405d",
-        },
-        title="Tools",
-    )
-    input: list[Item] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Eingangsressource (Input)"},
-            "options": {"conditional_visible": {"modes": ["query", "default"]}},
-            "range": "Category:Item",
-        },
-        title="Inputs",
-    )
-    output: list[Item] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Ausgangsressource (Output)"},
-            "options": {"conditional_visible": {"modes": ["query", "default"]}},
-            "range": "Category:Item",
-        },
-        title="Outputs",
-    )
-    projects: list[Project] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Projekt(e)"},
-            "options": {"conditional_visible": {"modes": ["query", "default"]}},
-            "range": "Category:OSWb2d7e6a2eff94c82b7f1f2699d5b0ee3",
-        },
-        title="Project(s)",
-    )
-    parameters: dict[str, Any] | None = Field(None, title="Parameters")
-
-
-class Project(Item):
-    """
-    An enterprise (potentially individual but typically collaborative), planned to achieve a particular aim.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:Item?action=raw&slot=jsonschema",
-                {
-                    "abstract": {"@id": "Property:HasAbstract"},
-                    "budget_end": {"@id": "Property:HasBudgetEndDate"},
-                    "budget_ou": {"@id": "Property:HasBusinessUnit", "@type": "@id"},
-                    "budget_start": {"@id": "Property:HasBudgetStartDate"},
-                    "budget_type": {"@id": "Property:HasType", "@type": "@id"},
-                    "budget_year": {"@id": "Property:HasBudgetYear"},
-                    "end_date": {"@id": "Property:HasEndDate", "@type": "xsd:date"},
-                    "funding_type": {"@id": "Property:HasFundingType", "@type": "@id"},
-                    "funding_call": {"@id": "Property:HasFundingCall", "@type": "@id"},
-                    "funding": {"@id": "schema:funding", "@type": "@id"},
-                    "funding*": {"@id": "Property:HasFunding", "@type": "@id"},
-                    "funder": {"@id": "schema:funder", "@type": "@id"},
-                    "funder*": {"@id": "Property:HasFunder", "@type": "@id"},
-                    "member": {"@id": "schema:member", "@type": "@id"},
-                    "member*": {"@id": "Property:HasMember", "@type": "@id"},
-                    "member_of": {"@id": "schema:memberOf", "@type": "@id"},
-                    "member_of*": {"@id": "Property:IsMemberOf", "@type": "@id"},
-                    "other_documents": {
-                        "@id": "Property:HasAdditionalDocument",
-                        "@type": "@id",
-                    },
-                    "ou": {"@id": "Property:HasBusinessUnit", "@type": "@id"},
-                    "project_manager": {"@id": "Property:HasManager", "@type": "@id"},
-                    "project_status": {"@id": "Property:HasStatus", "@type": "@id"},
-                    "project_type": {"@id": "Property:HasType", "@type": "@id"},
-                    "proposal": {"@id": "Property:HasProposal", "@type": "@id"},
-                    "report": {"@id": "Property:HasReport", "@type": "@id"},
-                    "start_date": {"@id": "Property:HasStartDate", "@type": "xsd:date"},
-                    "subjects": {"@id": "Property:HasTopic", "@type": "@id"},
-                    "total_budget": {"@id": "Property:HasStatement"},
-                    "year": {"@id": "Property:HasYear"},
-                    "yearly_budget": {"@id": "Property:HasBudgetPart", "@type": "@id"},
-                    "yearly_budget_sum": {"@id": "Property:HasStatement"},
-                    "yearly_budget_sum_weighted": {"@id": "Property:HasStatement"},
-                    "probability_of_successful_funding": {
-                        "@id": "Property:HasStatement"
-                    },
-                },
-            ],
-            "uuid": "b2d7e6a2-eff9-4c82-b7f1-f2699d5b0ee3",
-            "title": "Project",
-            "title*": {"en": "Project", "de": "Projekt"},
-            "description": "An enterprise (potentially individual but typically collaborative), planned to achieve a particular aim.",
-            "description*": {
-                "de": "Ein (möglicherweise individuelles, in der Regel aber gemeinschaftliches) Unternehmen oder Unternehmung, das auf ein bestimmtes Ziel ausgerichtet ist."
-            },
-            "defaultProperties": [
-                "subjects",
-                "project_status",
-                "funding_type",
-                "funding_call",
-                "funder",
-                "funding",
-                "funding_name",
-                "ou",
-                "project_manager",
-                "member",
-                "member_of",
-                "start_date",
-                "end_date",
-                "total_budget",
-                "proposal",
-                "abstract",
-            ],
-        },
-    )
-    type: list[str] | None = ["Category:OSWb2d7e6a2eff94c82b7f1f2699d5b0ee3"]
-    subjects: list[str] | None = Field(
-        None, json_schema_extra={"title*": {"de": "Themen"}}, title="Subjects"
-    )
-    project_type: ProjectTypeDeprecated | None = Field(
-        "",
-        json_schema_extra={
-            "deprecated": True,
-            "title*": {"de": "Projekttyp (veraltet)"},
-            "description*": {"de": "Ersetzt mit Projekt- bzw. Förderart"},
-            "options": {
-                "enum_titles": ["House project", "Internal", "Public", "Industry"],
-                "enum_titles*": {
-                    "de": ["Hausprojekt", "Intern", "Öffentlich", "Industrie"]
-                },
-            },
-        },
-        title="Project type (deprecated)",
-    )
-    """
-    Replaced with Project / Funding Type
-    """
-    funding_type: ProjectType | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Projekt- bzw. Förderart"},
-            "range": "Category:OSW67f2ef61ba284c919fefa00d0e95a7a0",
-        },
-        title="Project / Funding Type",
-    )
-    project_status: ProjectStatus | None = Field(
-        default_factory=lambda: ProjectStatus.model_validate(
-            "Item:OSW55a9a9bda7b248759e48ae2e3ed6df1d"
-        ),
-        json_schema_extra={
-            "title*": {"de": "Projektstatus"},
-            "range": "Category:OSW490e38f9764f4408a244869a0ea98e7c",
-        },
-        title="Project status",
-    )
-    funding_call: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Förderaufruf"},
-            "options": {
-                "autocomplete": {
-                    "category": "Category:OSWd22af0aa3b00462a9da9b509538e8926"
-                }
-            },
-        },
-        title="Funding call",
-    )
-    funder: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Förder- bzw. Auftragsgeber"},
-            "category": "Category:OSW3cb8cef2225e403092f098f99bc4c472",
-        },
-        title="Funder",
-    )
-    funding: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Förderung"},
-            "description*": {"de": "Förderung oder Vertrag"},
-            "options": {
-                "autocomplete": {
-                    "category": "Category:OSWbe80b28aefd64921ba2e8e2d6225416e"
-                }
-            },
-        },
-        title="Funding",
-    )
-    """
-    Grant or contract
-    """
-    funding_name: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Förderung (Name)"},
-            "description*": {
-                "de": "Förderung oder Vertrag. Verwenden Sie diese Eigenschaft, um einen Text einzugeben, wenn Sie keine neue Instanz von Grant erstellen möchten."
-            },
-        },
-        title="Funding (name)",
-    )
-    """
-    Grant or contract. Use this property to enter a text if you don't want to create a new instance of grant.
-    """
-    probability_of_successful_funding: (
-        ProbabilityOfSuccessfulFundingInPercent | None
-    ) = Field(
-        None,
-        json_schema_extra={
-            "title*": {
-                "de": "Wahrscheinlichkeit einer erfolgreichen Förderung in Prozent"
-            },
-            "description*": {
-                "de": "Gibt die Wahrscheinlichkeit an, dass die Förderung genehmigt wird, bestimmt das gewichtete Budget"
-            },
-        },
-        title="Probability of Successful Funding in percent",
-    )
-    """
-    Indicates the likelihood that the funding will be approved, determines the weighted budget
-    """
-    ou: list[str] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"en": "OU", "de": "OE"},
-            "description*": {
-                "de": "Organisationseinheit (OE), die das Projekt durchführt"
-            },
-        },
-        title="OU",
-    )
-    """
-    Organizational Unit (OU), which carries out the project
-    """
-    project_manager: list[str] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"en": "Project Manager", "de": "Projektleiter*in"}
-        },
-        title="Project Manager",
-    )
-    member: list[str] | None = Field(
-        None,
-        json_schema_extra={"title*": {"en": "Member", "de": "Mitglieder*innen"}},
-        title="Member",
-    )
-    member_of: list[str] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"en": "Member of ", "de": "Mitglied von"},
-            "description*": {
-                "de": "Organisationseinheit(en), zu der das Projekt gehört, z. B. ein Projektcluster"
-            },
-        },
-        title="Member of",
-    )
-    """
-    Organizational unit(s), the project is a member of, e.g. a project cluster
-    """
-    start_date: date | None = Field(
-        None,
-        json_schema_extra={"title*": {"de": "Beginn"}, "options": {"flatpicker": {}}},
-        title="Start",
-    )
-    end_date: date | None = Field(
-        None,
-        json_schema_extra={"title*": {"de": "Ende"}, "options": {"flatpicker": {}}},
-        title="End",
-    )
-    total_budget: TotalBudget | None = Field(
-        None, json_schema_extra={"title*": {"de": "Budgetsumme"}}, title="Total Budget"
-    )
-    yearly_budget: list[YearlyBudget] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Jahresbudget"},
-            "options": {"disable_array_reorder": False, "enable_array_copy": True},
-        },
-        title="Yearly budget",
-    )
-    proposal: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Antrag"},
-            "options": {"upload": {}},
-            "links": [
-                {
-                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}&width=200&height=200{{/if}}",
-                    "mediaType": "image",
-                },
-                {
-                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}{{/if}}",
-                    "rel": "{{#if self}}download{{/if}}",
-                    "download": True,
-                },
-            ],
-        },
-        title="Proposal",
-    )
-    report: str | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Bericht"},
-            "options": {"upload": {}},
-            "links": [
-                {
-                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}&width=200&height=200{{/if}}",
-                    "mediaType": "image",
-                },
-                {
-                    "href": "{{#if self}}/w/index.php?title=Special:Redirect/file/{{self}}{{/if}}",
-                    "rel": "{{#if self}}download{{/if}}",
-                    "download": True,
-                },
-            ],
-        },
-        title="Report",
-    )
-    other_documents: list[str] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"en": "Additional documents", "de": "Sonstige Dokumente"}
-        },
-        title="Additional documents",
-    )
-    abstract: list[Description] | None = Field(
-        None,
-        json_schema_extra={
-            "title*": {"de": "Kurzbeschreibung"},
-            "eval_template": {
-                "type": "mustache-wikitext",
-                "mode": "render",
-                "$comment": "Displays value according to user language with eng as fallback option. Note: {{=<% %>=}} changes mustache expression from {{..}} to <% %> for mixing with wikitext templates",
-                "value": "{{=<% %>=}} {{#switch:{{USERLANGUAGECODE}} <%#abstract%> | {{#ifeq: <%lang%>|en|#default|<%lang%>}} = <%text%> <%/abstract%> }}",
-            },
-        },
-        title="Abstract",
-    )
-
-
 class Device(Tool, PhysicalItem):
     """
     A Tool that is a (phyiscal) piece of Hardware.
@@ -4934,45 +5198,6 @@ class StrictParticipantsProcess(Process):
     """
 
 
-class ProjectType(Enumeration):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSWd02741381aaa4709ae0753a0edc341ce?action=raw&slot=jsonschema"
-            ],
-            "uuid": "67f2ef61-ba28-4c91-9fef-a00d0e95a7a0",
-            "title": "ProjectType",
-            "title*": {"en": "Project Type", "de": "Projekttyp"},
-            "description": "",
-            "description*": {},
-        },
-    )
-    type: list[str] | None = ["Category:OSW67f2ef61ba284c919fefa00d0e95a7a0"]
-
-
-class BudgetType(Enumeration):
-    """
-    Type of usage of a certain budget
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSWd02741381aaa4709ae0753a0edc341ce?action=raw&slot=jsonschema"
-            ],
-            "uuid": "595b282a-edf0-4878-8f3e-e326454792ce",
-            "title": "BudgetType",
-            "title*": {"en": "Budget Type", "de": "Budget-Typ"},
-            "description": "Type of usage of a certain budget",
-            "description*": {
-                "en": "Type of usage of a certain budget",
-                "de": "Art der Verwendung eines bestimmten Budgets",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW595b282aedf048788f3ee326454792ce"]
-
-
 class Group(OrganizationalSubUnit):
     model_config = ConfigDict(
         json_schema_extra={
@@ -5017,32 +5242,6 @@ class AdministrativeProcess(StrictParticipantsProcess):
         },
     )
     type: list[str] | None = ["Category:OSW1a271f289649413488e2841580e43a45"]
-
-
-class ProjectStatus(StatusEnumeration):
-    """
-    Status for projects and project applications
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "@context": [
-                "/wiki/Category:OSW2c32802be59040248c85eda3479d484c?action=raw&slot=jsonschema"
-            ],
-            "uuid": "490e38f9-764f-4408-a244-869a0ea98e7c",
-            "title": "ProjectStatus",
-            "title*": {
-                "en": "Project (Application) Status",
-                "de": "Projekt(antrags)status",
-            },
-            "description": "Status for projects and project applications",
-            "description*": {
-                "en": "Status for projects and project applications",
-                "de": "Status für Projekte und Projektanträge",
-            },
-        },
-    )
-    type: list[str] | None = ["Category:OSW490e38f9764f4408a244869a0ea98e7c"]
 
 
 class RiskAssessmentProcess(AdministrativeProcess):
@@ -7969,6 +8168,7 @@ Department.model_rebuild()
 Device.model_rebuild()
 DeviceType.model_rebuild()
 DigitalDocument.model_rebuild()
+Distribution.model_rebuild()
 EducationalOrganization.model_rebuild()
 EmploymentStatus.model_rebuild()
 Event.model_rebuild()
