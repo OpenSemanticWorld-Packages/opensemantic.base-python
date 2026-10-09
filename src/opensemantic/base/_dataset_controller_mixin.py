@@ -106,6 +106,22 @@ def _column_unit(row_cls, field: str, values: List[Any]) -> Optional[str]:
     return None
 
 
+def _file_url(controller) -> Optional[str]:
+    """The URL a file controller publishes, if it has one.
+
+    A remote file carries its own address; a local one does not, and reading its
+    ``url`` may need a live connection, so failures are ignored.
+    """
+    for attribute in ("download_url", "url", "access_url"):
+        try:
+            value = getattr(controller, attribute, None)
+        except Exception:  # noqa: BLE001 - a property may need a connection
+            continue
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 class DatasetControllerMixin:
     """Conversions between a dataset's inline rows, a DataFrame and files."""
 
@@ -240,8 +256,10 @@ class DatasetControllerMixin:
         """Write ``data`` to ``file``, attach a distribution and clear ``data``.
 
         ``file`` is a file entity or file controller that accepts the bytes; the
-        distribution records its media type and size. Set ``keep_data`` to leave
-        the inline rows in place.
+        distribution records its media type and size, and the file's URL when it
+        has one, so the rows stay reachable once the dataset is reloaded and the
+        file is only a reference. Set ``keep_data`` to leave the inline rows in
+        place.
         """
         payload = self.serialize_data(fmt)
         controller = get_file_controller(file)
@@ -254,6 +272,7 @@ class DatasetControllerMixin:
             file=controller,
             media_type=CSV_MEDIA_TYPE if fmt == "csv" else JSON_MEDIA_TYPE,
             byte_size=len(payload),
+            download_url=_file_url(controller),
         )
         self.distributions = list(self.distributions or []) + [distribution]
         if not keep_data:
