@@ -14,7 +14,11 @@ from opensemantic.base._controller_mixin import (  # noqa: F401 (re-export)
     DownsampleParams,
     TSDCMixin,
 )
+from opensemantic.base._dataset_controller_mixin import (  # noqa: F401 (re-export)
+    DatasetControllerMixin,
+)
 from opensemantic.base.v1._model import Database as _Database
+from opensemantic.base.v1._model import Dataset as _Dataset
 from opensemantic.base.v1._model import DataTool as _DataTool
 
 
@@ -175,3 +179,7 @@ CreateToolParams = TSDCMixin.CreateToolParams
 DeleteToolParams = TSDCMixin.DeleteToolParams
 WriteToolChannelRawParams = TSDCMixin.WriteToolChannelRawParams
 ReadToolChannelRawParams = TSDCMixin.ReadToolChannelRawParams
+
+
+class DatasetController(DatasetControllerMixin, _Dataset):
+    """Dataset controller (v1)."""

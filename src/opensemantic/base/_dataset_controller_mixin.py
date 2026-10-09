@@ -1,0 +1,282 @@
+"""Controller for datasets that carry their rows inline or in a distribution.
+
+A ``Dataset`` holds its rows in ``data`` and/or points at them through a
+``Distribution``. This controller owns the conversions between those forms and
+a pandas DataFrame:
+
+* :meth:`to_df` / :meth:`from_df` - inline rows to and from a pint-pandas frame,
+  one column per row field, each carrying the field's declared unit.
+* :meth:`materialize_data` - fill ``data`` from a distribution's file.
+* :meth:`externalize_data` - write ``data`` to a file, describe it as a
+  distribution and drop the inline copy.
+
+File access goes through the ``opensemantic.core`` file controllers, so a
+distribution backed by a local file, an HTTP URL or a wiki page is read the same
+way and this module needs no knowledge of the storage behind it.
+
+The row values are typed characteristics; their unit handling is used through
+duck typing (``to_pint``, ``get_pint_ureg_compatible_str``) so this module does
+not depend on the characteristics package.
+"""
+
+import io
+import json
+import logging
+import typing
+from typing import Any, List, Optional
+
+from opensemantic.core import get_file_controller
+
+_logger = logging.getLogger(__name__)
+
+JSON_MEDIA_TYPE = "application/json"
+CSV_MEDIA_TYPE = "text/csv"
+
+
+def _fields_of(model_cls) -> dict:
+    """Field map of a model, for either pydantic version."""
+    return getattr(model_cls, "model_fields", None) or model_cls.__fields__
+
+
+def _unwrap(annotation):
+    """Strip Optional/List wrappers down to the contained model class."""
+    args = [a for a in typing.get_args(annotation) if a is not type(None)]  # noqa: E721
+    while args:
+        annotation = args[0]
+        args = [
+            a for a in typing.get_args(annotation) if a is not type(None)
+        ]  # noqa: E721
+    return annotation
+
+
+def _field_type(model_cls, name):
+    """The model class behind a field, for either pydantic version."""
+    field = _fields_of(model_cls)[name]
+    annotation = getattr(field, "annotation", None)
+    if annotation is None:
+        return getattr(field, "type_", None)
+    return _unwrap(annotation)
+
+
+def row_class_of(dataset_cls):
+    """The row model behind a dataset's ``data`` field, or ``None``.
+
+    ``data`` is a list of typed rows on a concrete dataset; on the generic
+    ``Dataset`` it carries no row model, in which case there is nothing to
+    convert.
+    """
+    fields = _fields_of(dataset_cls)
+    if "data" not in fields:
+        return None
+    row_cls = _field_type(dataset_cls, "data")
+    return (
+        row_cls
+        if hasattr(row_cls, "__fields__") or hasattr(row_cls, "model_fields")
+        else None
+    )
+
+
+def _value_fields(row_cls) -> List[str]:
+    """Data-column fields of a row model (all but the category marker)."""
+    return [name for name in _fields_of(row_cls) if name != "type"]
+
+
+def _declared_unit(row_cls, field: str) -> Optional[str]:
+    """Pint-compatible unit string declared as the field's default, if any."""
+    value_cls = _field_type(row_cls, field)
+    if value_cls is None:
+        return None
+    unit_field = _fields_of(value_cls).get("unit")
+    default = getattr(unit_field, "default", None) if unit_field else None
+    name = getattr(default, "name", None)
+    if name is None:
+        return None
+    to_pint_str = getattr(value_cls, "get_pint_ureg_compatible_str", None)
+    return to_pint_str(name) if callable(to_pint_str) else name
+
+
+def _column_unit(row_cls, field: str, values: List[Any]) -> Optional[str]:
+    """Unit for a column: the declared default, else the first value's own."""
+    declared = _declared_unit(row_cls, field)
+    if declared:
+        return declared
+    for value in values:
+        if value is not None and hasattr(value, "to_pint"):
+            return str(value.to_pint().units)
+    return None
+
+
+class DatasetControllerMixin:
+    """Conversions between a dataset's inline rows, a DataFrame and files."""
+
+    # -- DataFrame --------------------------------------------------------
+
+    def to_df(self):
+        """The dataset's rows as a pint-pandas DataFrame.
+
+        One column per row field, converted to that field's declared unit;
+        missing optional values become NA.
+        """
+        import pandas as pd
+
+        row_cls = row_class_of(type(self))
+        rows = self.data or []
+        if row_cls is None:
+            raise TypeError(
+                f"{type(self).__name__}.data carries no row model to convert"
+            )
+
+        columns = {}
+        for field in _value_fields(row_cls):
+            values = [getattr(row, field, None) for row in rows]
+            unit = _column_unit(row_cls, field, values)
+            if unit is None:
+                columns[field] = pd.Series(values, name=field, dtype="object")
+                continue
+            magnitudes = [
+                value.to_pint().to(unit).magnitude if value is not None else None
+                for value in values
+            ]
+            columns[field] = pd.Series(magnitudes, dtype=f"pint[{unit}]", name=field)
+        return pd.DataFrame(columns)
+
+    @classmethod
+    def from_df(cls, df, **kwargs):
+        """Build a dataset from a pint-pandas frame.
+
+        Columns matching a row field are converted to that field's declared unit
+        and stored; unknown columns are ignored. Remaining ``kwargs`` are passed
+        to the dataset (``label`` is required by the model).
+        """
+        import pandas as pd
+
+        row_cls = row_class_of(cls)
+        if row_cls is None:
+            raise TypeError(f"{cls.__name__}.data carries no row model to build")
+
+        known = set(_value_fields(row_cls))
+        columns = [name for name in df.columns if name in known]
+
+        magnitudes = {}
+        for field in columns:
+            series = df[field]
+            unit = _declared_unit(row_cls, field)
+            if unit is not None and hasattr(series, "pint"):
+                series = series.pint.to(unit)
+            magnitudes[field] = (
+                series.pint.magnitude if hasattr(series, "pint") else series
+            )
+
+        rows = []
+        for i in range(len(df)):
+            values = {}
+            for field in columns:
+                magnitude = magnitudes[field].iloc[i]
+                if pd.isna(magnitude):
+                    continue
+                values[field] = {"value": float(magnitude)}
+            rows.append(row_cls(**values))
+        return cls(data=rows, **kwargs)
+
+    # -- Distributions ----------------------------------------------------
+
+    def _distribution_controller(self, distribution):
+        """File controller for a distribution's file, or ``None``."""
+        file = getattr(distribution, "file", None)
+        if file is not None:
+            return get_file_controller(file)
+        url = getattr(distribution, "download_url", None) or getattr(
+            distribution, "access_url", None
+        )
+        if not url:
+            return None
+        from opensemantic.core import RemoteFile
+
+        return get_file_controller(RemoteFile(label=self.label, download_url=url))
+
+    def materialize_data(self, distribution=None):
+        """Fill ``data`` from a distribution's file and return the rows.
+
+        Without an explicit distribution the first one that has a readable file
+        is used. The file is parsed by its ``media_type`` (JSON or CSV).
+        """
+        import pandas as pd
+
+        distributions = (
+            [distribution]
+            if distribution is not None
+            else list(getattr(self, "distributions", None) or [])
+        )
+        row_cls = row_class_of(type(self))
+        for dist in distributions:
+            controller = self._distribution_controller(dist)
+            if controller is None:
+                continue
+            with controller.get() as handle:
+                payload = handle.read()
+            if isinstance(payload, str):
+                payload = payload.encode("utf-8")
+
+            media_type = getattr(dist, "media_type", None) or JSON_MEDIA_TYPE
+            if media_type == CSV_MEDIA_TYPE:
+                frame = pd.read_csv(
+                    io.BytesIO(payload), header=[0, 1], index_col=0
+                ).pint.quantify(level=-1)
+                self.data = type(self).from_df(frame, label=self.label).data
+            else:
+                entries = json.loads(payload.decode("utf-8"))
+                if isinstance(entries, dict):
+                    entries = entries.get("data", [])
+                self.data = [
+                    entry if isinstance(entry, row_cls) else row_cls(**entry)
+                    for entry in entries
+                ]
+            return self.data
+        raise ValueError(
+            f"{type(self).__name__} has no distribution with a readable file"
+        )
+
+    def externalize_data(self, file, fmt: str = "json", keep_data: bool = False):
+        """Write ``data`` to ``file``, attach a distribution and clear ``data``.
+
+        ``file`` is a file entity or file controller that accepts the bytes; the
+        distribution records its media type and size. Set ``keep_data`` to leave
+        the inline rows in place.
+        """
+        payload = self.serialize_data(fmt)
+        controller = get_file_controller(file)
+        if controller is None:
+            raise ValueError(f"No file controller for {type(file).__name__}")
+        controller.put(io.BytesIO(payload))
+
+        distribution_cls = _field_type(type(self), "distributions")
+        distribution = distribution_cls(
+            file=controller,
+            media_type=CSV_MEDIA_TYPE if fmt == "csv" else JSON_MEDIA_TYPE,
+            byte_size=len(payload),
+        )
+        self.distributions = list(self.distributions or []) + [distribution]
+        if not keep_data:
+            self.data = None
+        return distribution
+
+    def serialize_data(self, fmt: str = "json") -> bytes:
+        """The inline rows as JSON or CSV bytes.
+
+        JSON keeps the typed values, so it round-trips without loss. CSV carries
+        a two-row ``(field, unit)`` header written by pint-pandas.
+        """
+        if fmt == "csv":
+            return self.to_df().pint.dequantify().to_csv().encode("utf-8")
+        if fmt != "json":
+            raise ValueError(f"Unsupported format: {fmt}")
+        rows = self.data or []
+        dump = [
+            (
+                row.dict(exclude_none=True)
+                if hasattr(row, "dict")
+                else row.model_dump(exclude_none=True, mode="json")
+            )
+            for row in rows
+        ]
+        return json.dumps(dump, default=str).encode("utf-8")
