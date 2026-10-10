@@ -106,6 +106,19 @@ def _column_unit(row_cls, field: str, values: List[Any]) -> Optional[str]:
     return None
 
 
+class _NamedBytesIO(io.BytesIO):
+    """A buffer that carries a file name.
+
+    A controller may derive metadata from the stream it is handed - the wiki one
+    takes the uploaded page's title from ``file.name`` - and a plain BytesIO has
+    none.
+    """
+
+    def __init__(self, data: bytes, name: str):
+        super().__init__(data)
+        self.name = name
+
+
 def _file_url(controller) -> Optional[str]:
     """The URL a file controller publishes, if it has one.
 
@@ -265,7 +278,10 @@ class DatasetControllerMixin:
         controller = get_file_controller(file)
         if controller is None:
             raise ValueError(f"No file controller for {type(file).__name__}")
-        controller.put(io.BytesIO(payload))
+        name = getattr(controller, "name", None) or f"data.{fmt}"
+        if not str(name).endswith(f".{fmt}"):
+            name = f"{name}.{fmt}"
+        controller.put(_NamedBytesIO(payload, str(name)))
 
         distribution_cls = _field_type(type(self), "distributions")
         distribution = distribution_cls(
