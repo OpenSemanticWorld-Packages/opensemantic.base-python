@@ -26,6 +26,7 @@ import typing
 from collections import abc
 from typing import Any, List, Optional
 
+from opensemantic.base import _pint_csv
 from opensemantic.core import get_file_controller
 
 _logger = logging.getLogger(__name__)
@@ -366,8 +367,6 @@ class DatasetControllerMixin:
         ``controller_kwargs`` are handed to the file controller, which is how
         a caller passes the session or credentials the file needs.
         """
-        import pandas as pd
-
         distributions = (
             [distribution]
             if distribution is not None
@@ -392,10 +391,11 @@ class DatasetControllerMixin:
 
                 media_type = getattr(dist, "media_type", None) or JSON_MEDIA_TYPE
                 if media_type == CSV_MEDIA_TYPE:
-                    frame = pd.read_csv(
-                        io.BytesIO(payload), header=[0, 1], index_col=0
-                    ).pint.quantify(level=-1)
-                    self.data = type(self).from_df(frame, label=self.label).data
+                    self.data = (
+                        type(self)
+                        .from_df(_pint_csv.read_csv(payload), label=self.label)
+                        .data
+                    )
                 else:
                     entries = json.loads(payload.decode("utf-8"))
                     if isinstance(entries, dict):
@@ -457,7 +457,7 @@ class DatasetControllerMixin:
         a two-row ``(field, unit)`` header written by pint-pandas.
         """
         if fmt == "csv":
-            return self.to_df().pint.dequantify().to_csv().encode("utf-8")
+            return _pint_csv.to_csv(self.to_df())
         if fmt != "json":
             raise ValueError(f"Unsupported format: {fmt}")
         rows = self.data or []

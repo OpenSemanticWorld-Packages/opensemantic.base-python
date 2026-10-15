@@ -210,24 +210,14 @@ def _dequantify(df):
 
     Produces a two-level column header ``(label, unit)`` so a dedicated unit
     header row is written on export and the column keys stay unit-free. Pint
-    columns contribute their magnitude and unit; plain (text) columns keep their
-    values under an empty unit.
-    """
-    import pandas as pd
+    columns contribute their magnitude and unit; plain (text) columns keep
+    their values under an empty unit.
 
-    tuples = []
-    mags = []
-    for name in df.columns:
-        s = df[name]
-        if str(s.dtype).startswith("pint"):
-            tuples.append((str(name), str(s.pint.units)))
-            mags.append(s.pint.magnitude)
-        else:
-            tuples.append((str(name), ""))
-            mags.append(s)
-    out = pd.concat(mags, axis=1)
-    out.columns = pd.MultiIndex.from_tuples(tuples, names=[None, "unit"])
-    return out
+    Shared with the dataset controller, which reads this form back.
+    """
+    from opensemantic.base._pint_csv import dequantify
+
+    return dequantify(df)
 
 
 class BaseDataView:

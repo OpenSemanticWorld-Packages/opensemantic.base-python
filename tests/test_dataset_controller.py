@@ -344,6 +344,7 @@ def mixed_ctx(ctx):
         temperature: Optional[temperature_cls] = None
         stamp: Optional[datetime] = None
         note: Optional[str] = None
+        cycle: Optional[int] = None
 
     class MixedDataset(ctx.base.Dataset):
         data: Optional[List[MixedRow]] = None
@@ -366,11 +367,13 @@ def _mixed_dataset(ctx):
                 temperature=ctx.Temperature(value=300.0),
                 stamp=datetime(2026, 1, 1, 12, 0, 0),
                 note="start",
+                cycle=1,
             ),
             ctx.MixedRow(
                 temperature=ctx.Temperature(value=301.0),
                 stamp=datetime(2026, 1, 1, 12, 1, 0),
                 note="end",
+                cycle=2,
             ),
         ],
     )
@@ -394,6 +397,8 @@ def test_mixed_rows_survive_a_file_round_trip(mixed_ctx, fmt, tmp_path):
     rows = dataset.materialize_data()
 
     assert [row.note for row in rows] == ["start", "end"]
+    assert [row.cycle for row in rows] == [1, 2]
+    assert rows[0].temperature.to_pint().magnitude == pytest.approx(300.0)
 
 
 def test_serialize_data_json_keeps_a_datetime(mixed_ctx):
@@ -464,3 +469,79 @@ def test_file_url_survives_a_property_that_raises_anything(caplog):
 
     assert _file_url(Broken()) is None
     assert "the wiki said no" in caplog.text
+
+
+# -- a table with no quantity column at all -----------------------------------
+
+
+@pytest.fixture
+def plain_ctx(ctx):
+    """A dataset whose rows carry only str and int, no quantity."""
+
+    class AddressRow(ctx.row_base):
+        ID: Optional[int] = None
+        city: Optional[str] = None
+        state: Optional[str] = None
+
+    class AddressDataset(ctx.base.Dataset):
+        data: Optional[List[AddressRow]] = None
+
+    class AddressController(ctx.base.DatasetControllerMixin, AddressDataset):
+        pass
+
+    ctx.AddressRow = AddressRow
+    ctx.AddressController = AddressController
+    return ctx
+
+
+def _addresses(ctx):
+    return ctx.AddressController(
+        label=[ctx.core.Label(text="Addresses")],
+        data=[
+            ctx.AddressRow(ID=18, city="Cambridge", state="MA"),
+            ctx.AddressRow(ID=19, city="Boston", state="MA"),
+        ],
+    )
+
+
+def test_csv_of_a_table_without_units(plain_ctx):
+    """pint-pandas refuses a frame with no unit column; the dataset must not."""
+    dataset = _addresses(plain_ctx)
+
+    text = dataset.serialize_data("csv").decode("utf-8")
+
+    lines = text.splitlines()
+    assert lines[0].split(",")[1:] == ["ID", "city", "state"]
+    assert lines[1] == "unit,,,"
+    assert lines[2].endswith("18,Cambridge,MA")
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+def test_a_table_without_units_round_trips(plain_ctx, fmt, tmp_path):
+    dataset = _addresses(plain_ctx)
+
+    dataset.externalize_data(_local_file(plain_ctx, tmp_path / f"a.{fmt}"), fmt=fmt)
+    rows = dataset.materialize_data()
+
+    assert [(row.ID, row.city, row.state) for row in rows] == [
+        (18, "Cambridge", "MA"),
+        (19, "Boston", "MA"),
+    ]
+
+
+def test_a_foreign_csv_is_read_with_one_header_row(plain_ctx, tmp_path):
+    """A CSV from anywhere else has no unit row, and must not lose a data row."""
+    target = tmp_path / "foreign.csv"
+    target.write_text("ID,city,state\n18,Cambridge,MA\n", encoding="utf-8")
+    dataset = plain_ctx.AddressController(
+        label=[plain_ctx.core.Label(text="Addresses")],
+        distributions=[
+            plain_ctx.base.Distribution(
+                file=_local_file(plain_ctx, target), media_type="text/csv"
+            )
+        ],
+    )
+
+    rows = dataset.materialize_data()
+
+    assert [(row.ID, row.city) for row in rows] == [(18, "Cambridge")]
