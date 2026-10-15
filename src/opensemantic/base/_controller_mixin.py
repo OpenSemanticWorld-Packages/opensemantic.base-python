@@ -80,9 +80,13 @@ class DataToolMixin(BaseController):
         # Auto-init archive database from storage_locations
         _archive_db = getattr(self, "archive_database", None)
         _needs_init = _archive_db is None or isinstance(_archive_db, dict)
-        _storage = getattr(self, "storage_locations", None)
-        if self.auto_archive and _needs_init and _storage:
-            self.archive_database = self._init_archive_database(_storage[0])
+        if self.auto_archive and _needs_init:
+            # read last: storage_locations is a link field, so reading it
+            # resolves its IRIs and needs a registered resolver. Constructing
+            # a tool that does not archive must not require one.
+            _storage = getattr(self, "storage_locations", None)
+            if _storage:
+                self.archive_database = self._init_archive_database(_storage[0])
 
     # __setattr__ for private attrs inherited from BaseController
     # get_osw_id() and get_iri() are inherited from OswBaseModel

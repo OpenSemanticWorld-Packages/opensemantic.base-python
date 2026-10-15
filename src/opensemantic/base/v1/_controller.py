@@ -14,7 +14,11 @@ from opensemantic.base._controller_mixin import (  # noqa: F401 (re-export)
     DownsampleParams,
     TSDCMixin,
 )
+from opensemantic.base._dataset_controller_mixin import (  # noqa: F401 (re-export)
+    DatasetControllerMixin,
+)
 from opensemantic.base.v1._model import Database as _Database
+from opensemantic.base.v1._model import Dataset as _Dataset
 from opensemantic.base.v1._model import DataTool as _DataTool
 
 
@@ -175,3 +179,19 @@ CreateToolParams = TSDCMixin.CreateToolParams
 DeleteToolParams = TSDCMixin.DeleteToolParams
 WriteToolChannelRawParams = TSDCMixin.WriteToolChannelRawParams
 ReadToolChannelRawParams = TSDCMixin.ReadToolChannelRawParams
+
+
+class DatasetController(DatasetControllerMixin, _Dataset):
+    """Dataset controller (v1)."""
+
+
+# A controller stands in for the model it implements, so a Dataset a caller
+# builds can convert and materialize itself; it needs nothing beyond what the
+# model requires and its __init__ does nothing but construct.
+#
+# DataToolController and the database controllers keep their own names. The
+# first indexes channels, warns about unloaded characteristics and may open an
+# archive database on construction, which is not what building a data model
+# should do. Of the latter there are three for one Database, and the local one
+# needs a db_path, so which applies is the caller's choice, not a default.
+Dataset = DatasetController

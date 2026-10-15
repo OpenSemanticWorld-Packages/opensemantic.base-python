@@ -1,5 +1,9 @@
 """DataTool view UI components."""
 
+from opensemantic.base.view._base_view import (
+    COLORS,
+    BaseDataView,
+)
 from opensemantic.base.view._channel_utils import (
     build_tree_source,
     flatten_composite_channels,
@@ -39,6 +43,8 @@ from opensemantic.base.view.url_config import (
 )
 
 __all__ = [
+    "BaseDataView",
+    "COLORS",
     "DataToolView",
     "ProcessObjectView",
     "BaseViewConfig",

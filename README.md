@@ -178,6 +178,20 @@ The rendered figures are exposed via `view.figures` so a host app can add its
 own annotations; `view.export_series()` returns the plotted series as tidy
 records.
 
+Export covers every checked channel, numeric and text-log alike, while the plot
+HTML is numeric-only. Column names must stay unique: composite sub-fields share
+their parent channel label, and a duplicate name makes `df[label]` return a
+DataFrame instead of a Series, which breaks the per-column `dequantify()`.
+Composite series are therefore labelled `<channel>/<field>`, with a dedupe
+safety net in `_series_to_dataframe`.
+
+HTML export builds a fresh set of figures rather than reusing the live ones:
+`bokeh.embed.file_html` raises `RuntimeError: Models must be owned by only a
+single document` for a figure already rendered in a `pn.pane.Bokeh`, and
+`copy.deepcopy` on a figure fails too. Both views therefore split figure
+construction into a pure `_make_figures()`, used for the live panes and reused
+by `_export_figures()`.
+
 ### Configuration and URL sync
 
 The config is the complete, JSON-serializable state of a view, composed to
@@ -202,6 +216,55 @@ aggregate model.
 
 *Two views composed under one aggregate config, URL-synced in PLAIN_KEYS mode
 (readable `?app.reactor...` params in the address bar).*
+
+### Implementation notes
+
+Behaviour of the Panel/Bokeh stack that the view code depends on. Read this
+before touching figure building, zoom/reset or layout CSS in
+`src/opensemantic/base/view/`.
+
+**Linked x-axes need one shared range at creation.** Create a single
+`DataRange1d` and pass it to every figure while building it:
+
+```python
+shared_x = DataRange1d()
+fig = bk_figure(x_range=shared_x, ...)   # every figure
+```
+
+Reassigning `f.x_range` afterwards races the render and leaves some plots
+unlinked, so panning moves only part of them. The y-ranges stay per figure, one
+scale per characteristic.
+
+**Reset events do not reach the server.** `figure.on_event(Reset, cb)` never
+fires under `pn.pane.Bokeh`: Bokeh *events* are not forwarded, while model
+*property* changes sync reliably. Bridge it through a property:
+
+```python
+self._reset_bridge = ColumnDataSource(data={"n": [0]})
+self._reset_bridge.on_change("data", self._on_reset_bridge)
+fig.js_on_event(Reset, CustomJS(args={"bridge": self._reset_bridge},
+    code="bridge.data = {n: [(bridge.data.n[0] || 0) + 1]};"))
+```
+
+`m.reset.emit()` does fire `js_on_event`, but client-side only, so it is useful
+in tests and not a substitute for the bridge.
+
+**Shadow-DOM CSS.** Page-level `pn.config.raw_css` does not reliably reach
+elements inside a component's shadow root. For a Panel `AnyWidgetComponent` such
+as Wunderbaum, pass `stylesheets=[css]`, which injects into the component's own
+shadow root. That is how the tree grid's hardcoded inline `width: 800px` is
+overridden.
+
+**Content scrolling is owned by panelini.** `.content` lacked the `overflow-y:
+auto` that `.sidebar` has, so tall stacked plots spilled past the wallpaper;
+fixed upstream in
+[panelini#37](https://github.com/OpenSemanticWorld/panelini/pull/37). With that
+in place, leave `_plot_col` uncapped, otherwise a `max_height` plus `scroll=True`
+adds a second, nested scrollbar.
+
+**Stale Bokeh models.** After a pane rebuild, old figures and ranges linger in
+`doc._all_models`. When inspecting through JS, filter to the live ones or you
+will read a phantom range.
 
 ## Server-side downsampling
 
@@ -413,3 +476,21 @@ PostgREST integration tests require a running [pgstack](https://github.com/opens
 1. Start pgstack: `docker compose -f docker-compose.yml -f docker-compose.example-tsdb.override.yml up -d`
 2. Copy `tests/.env.example` to `tests/.env` and fill in `TEST_PGRST_URL` and `TEST_PGRST_JWT_SECRET`
 3. Run tests - PostgREST tests are skipped unless both env vars are set
+
+### Browser tests
+
+`tests/test_export_browser.py` drives `panel serve` with Playwright. Four things
+it has to get right:
+
+- `examples/datatool_dashboard.py` pins its SQLite database next to the script,
+  so the test serves a **copy in a temp directory** rather than contending with
+  a running demo on the shared file.
+- Bokeh 3 renders widgets in a shadow root, so find buttons with
+  `get_by_role("button", name=...)`, which pierces it, not a light-DOM
+  `querySelectorAll`.
+- Readiness is a raw TCP connect, not an HTTP GET: a corporate proxy may divert
+  localhost GETs.
+- Port cleanup parses `netstat` by column, not by the state word, which is
+  localized (German Windows prints `ABHOEREN`, not `LISTENING`).
+- `FileDownload` generates its payload lazily on click, so wrap the click in
+  `expect_download`.
