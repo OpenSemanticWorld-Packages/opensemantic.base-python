@@ -70,9 +70,6 @@ def ctx(request):
     class TempDataset(base_mod.Dataset):
         data: Optional[List[Row]] = None
 
-    class TempDatasetController(base_mod.DatasetControllerMixin, TempDataset):
-        pass
-
     return SimpleNamespace(
         version=version,
         base=base_mod,
@@ -82,7 +79,7 @@ def ctx(request):
         Time=time_cls,
         row_base=row_base,
         Row=Row,
-        cls=TempDatasetController,
+        cls=TempDataset,
     )
 
 
@@ -140,17 +137,14 @@ def test_from_df_keeps_a_unit_the_model_does_not_declare(ctx):
     class GenericDataset(ctx.base.Dataset):
         data: Optional[List[GenericRow]] = None
 
-    class GenericController(ctx.base.DatasetControllerMixin, GenericDataset):
-        pass
-
-    source = GenericController(
+    source = GenericDataset(
         label=[ctx.core.Label(text="Generic")],
         data=[GenericRow(reading=_in_grams(ctx, 5.0))],
     )
     df = source.to_df()
     assert str(df["reading"].pint.units) == "gram"
 
-    restored = GenericController.from_df(df, label=source.label)
+    restored = GenericDataset.from_df(df, label=source.label)
 
     assert restored.data[0].reading.to_pint().to("gram").magnitude == pytest.approx(5.0)
 
@@ -171,10 +165,7 @@ def test_from_df_reports_a_column_it_cannot_build(dataset):
 
 
 def test_to_df_without_a_row_model():
-    class Plain(opensemantic.base.DatasetControllerMixin, opensemantic.base.Dataset):
-        pass
-
-    plain = Plain(label=[opensemantic.core.Label(text="Plain")])
+    plain = opensemantic.base.Dataset(label=[opensemantic.core.Label(text="Plain")])
     with pytest.raises(TypeError, match="no row model"):
         plain.to_df()
 
@@ -349,11 +340,8 @@ def mixed_ctx(ctx):
     class MixedDataset(ctx.base.Dataset):
         data: Optional[List[MixedRow]] = None
 
-    class MixedController(ctx.base.DatasetControllerMixin, MixedDataset):
-        pass
-
     ctx.MixedRow = MixedRow
-    ctx.MixedController = MixedController
+    ctx.MixedController = MixedDataset
     return ctx
 
 
@@ -425,10 +413,7 @@ def test_materialize_names_the_column_it_could_not_build(ctx, dataset, tmp_path)
 
 
 def test_materialize_without_a_row_model():
-    class Plain(opensemantic.base.DatasetControllerMixin, opensemantic.base.Dataset):
-        pass
-
-    plain = Plain(label=[opensemantic.core.Label(text="Plain")])
+    plain = opensemantic.base.Dataset(label=[opensemantic.core.Label(text="Plain")])
     with pytest.raises(TypeError, match="no row model"):
         plain.materialize_data()
 
@@ -486,11 +471,8 @@ def plain_ctx(ctx):
     class AddressDataset(ctx.base.Dataset):
         data: Optional[List[AddressRow]] = None
 
-    class AddressController(ctx.base.DatasetControllerMixin, AddressDataset):
-        pass
-
     ctx.AddressRow = AddressRow
-    ctx.AddressController = AddressController
+    ctx.AddressController = AddressDataset
     return ctx
 
 

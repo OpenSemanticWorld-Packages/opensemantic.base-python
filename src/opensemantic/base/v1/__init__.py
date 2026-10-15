@@ -12,6 +12,7 @@ finally:
 from opensemantic.base.v1._model import *  # noqa
 
 try:
+    from opensemantic.base.v1 import _controller  # noqa: F401
     from opensemantic.base.v1._controller import *  # noqa
 except ImportError as _error:  # pragma: no cover - an optional dependency is missing
     # Without this the controllers are simply absent and every lookup returns
@@ -26,3 +27,11 @@ except ImportError as _error:  # pragma: no cover - an optional dependency is mi
     _logging.getLogger(__name__).info(
         "opensemantic.base controllers are unavailable: %s", _error
     )
+
+# Assignments, not imports: isort sorts an import above the star import, which
+# would put the pure models back. These names resolve to the controllers that
+# implement them.
+try:
+    Dataset = _controller.DatasetController
+except NameError:  # pragma: no cover - controllers unavailable, see above
+    pass

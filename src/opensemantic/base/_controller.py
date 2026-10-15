@@ -183,3 +183,15 @@ ReadToolChannelRawParams = TSDCMixin.ReadToolChannelRawParams
 
 class DatasetController(DatasetControllerMixin, _Dataset):
     """Dataset controller (v2)."""
+
+
+# A controller stands in for the model it implements, so a Dataset a caller
+# builds can convert and materialize itself; it needs nothing beyond what the
+# model requires and its __init__ does nothing but construct.
+#
+# DataToolController and the database controllers keep their own names. The
+# first indexes channels, warns about unloaded characteristics and may open an
+# archive database on construction, which is not what building a data model
+# should do. Of the latter there are three for one Database, and the local one
+# needs a db_path, so which applies is the caller's choice, not a default.
+Dataset = DatasetController

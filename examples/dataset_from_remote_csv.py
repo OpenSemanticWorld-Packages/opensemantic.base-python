@@ -19,7 +19,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from opensemantic.base import Dataset, DatasetControllerMixin, Distribution
+from opensemantic.base import Dataset, Distribution
 from opensemantic.core import Label, LocalFile, RemoteFile
 
 CSV_URL = (
@@ -37,19 +37,20 @@ class AddressRow(BaseModel):
 
 
 class AddressDataset(Dataset):
-    """A dataset whose rows are addresses."""
+    """A dataset whose rows are addresses.
+
+    ``Dataset`` is the controller that implements the model, so this subclass
+    carries the conversions - ``to_df``, ``materialize_data`` - without naming
+    them.
+    """
 
     data: Optional[List[AddressRow]] = None
-
-
-class AddressDatasetController(DatasetControllerMixin, AddressDataset):
-    """The dataset plus the conversions: rows to a frame, to and from a file."""
 
 
 def main() -> None:
     # 1. The dataset refers to the file instead of holding its content. The
     #    file entity is a RemoteFile, so reading it needs no local copy.
-    dataset = AddressDatasetController(
+    dataset = AddressDataset(
         label=[Label(text="W3C CSVW example addresses")],
         distributions=[
             Distribution(
