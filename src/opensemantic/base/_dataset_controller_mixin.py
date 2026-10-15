@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import typing
+from collections import abc
 from typing import Any, List, Optional
 
 from opensemantic.core import get_file_controller
@@ -39,14 +40,25 @@ def _fields_of(model_cls) -> dict:
 
 
 def _unwrap(annotation):
-    """Strip Optional/List wrappers down to the contained model class."""
-    args = [a for a in typing.get_args(annotation) if a is not type(None)]  # noqa: E721
-    while args:
-        annotation = args[0]
+    """Strip Optional/List wrappers down to the contained model class.
+
+    A mapping unwraps to its *value* type, and a union of more than one real
+    member is left as it is: there is no single class behind it, and taking the
+    first argument turned ``Optional[Dict[str, X]]`` into ``str``.
+    """
+    while True:
+        origin = typing.get_origin(annotation)
         args = [
             a for a in typing.get_args(annotation) if a is not type(None)
         ]  # noqa: E721
-    return annotation
+        if not args:
+            return annotation
+        if isinstance(origin, type) and issubclass(origin, abc.Mapping):
+            annotation = args[-1]
+            continue
+        if len(args) > 1:
+            return annotation
+        annotation = args[0]
 
 
 def _field_type(model_cls, name):
@@ -56,6 +68,13 @@ def _field_type(model_cls, name):
     if annotation is None:
         return getattr(field, "type_", None)
     return _unwrap(annotation)
+
+
+def _is_model_cls(obj) -> bool:
+    """Whether ``obj`` is a model class of either pydantic version."""
+    return isinstance(obj, type) and (
+        hasattr(obj, "model_fields") or hasattr(obj, "__fields__")
+    )
 
 
 def row_class_of(dataset_cls):
@@ -69,11 +88,7 @@ def row_class_of(dataset_cls):
     if "data" not in fields:
         return None
     row_cls = _field_type(dataset_cls, "data")
-    return (
-        row_cls
-        if hasattr(row_cls, "__fields__") or hasattr(row_cls, "model_fields")
-        else None
-    )
+    return row_cls if _is_model_cls(row_cls) else None
 
 
 def _value_fields(row_cls) -> List[str]:
@@ -82,9 +97,14 @@ def _value_fields(row_cls) -> List[str]:
 
 
 def _declared_unit(row_cls, field: str) -> Optional[str]:
-    """Pint-compatible unit string declared as the field's default, if any."""
+    """Pint-compatible unit string declared as the field's default, if any.
+
+    A field that is not a model - ``timestamp: Optional[datetime]``, a plain
+    string - carries no unit, which is what makes the unit-less column path
+    reachable.
+    """
     value_cls = _field_type(row_cls, field)
-    if value_cls is None:
+    if not _is_model_cls(value_cls):
         return None
     unit_field = _fields_of(value_cls).get("unit")
     default = getattr(unit_field, "default", None) if unit_field else None
@@ -106,6 +126,54 @@ def _column_unit(row_cls, field: str, values: List[Any]) -> Optional[str]:
     return None
 
 
+def _remote_file_cls(dataset):
+    """``RemoteFile`` of the dataset's own pydantic layer.
+
+    The v1 and v2 models are not interchangeable: handing v1 labels to the v2
+    class fails validation, so the layer the dataset belongs to decides.
+    """
+    from pydantic.v1 import BaseModel as BaseModelV1
+
+    if isinstance(dataset, BaseModelV1):
+        from opensemantic.core.v1 import RemoteFile
+    else:
+        from opensemantic.core import RemoteFile
+    return RemoteFile
+
+
+def _row_value(dataset_cls, field: str, value_cls, magnitude, declared, unit):
+    """One cell of a frame as the value a row field takes.
+
+    With a declared unit the column was converted to it, so the magnitude alone
+    is unambiguous. Without one the column's own unit has to travel with the
+    value, or the dataset reads back in the model's default unit instead.
+    """
+    if _is_model_cls(value_cls) and isinstance(magnitude, value_cls):
+        return magnitude
+    try:
+        number = float(magnitude)
+    except (TypeError, ValueError) as error:
+        raise TypeError(
+            f"{dataset_cls.__name__}.{field}: cannot build a row value from "
+            f"{magnitude!r} - the column holds neither a number nor a typed value"
+        ) from error
+    if declared is not None or unit is None:
+        return {"value": number}
+    from_pint = getattr(value_cls, "from_pint", None)
+    if not callable(from_pint):
+        raise TypeError(
+            f"{dataset_cls.__name__}.{field}: the column carries {unit}, but "
+            f"{getattr(value_cls, '__name__', value_cls)} declares no unit and "
+            "cannot be built from a pint quantity"
+        )
+    import pint
+
+    return from_pint(
+        pint.get_application_registry().Quantity(number, unit),
+        quantity_type=value_cls,
+    )
+
+
 class _NamedBytesIO(io.BytesIO):
     """A buffer that carries a file name.
 
@@ -123,12 +191,17 @@ def _file_url(controller) -> Optional[str]:
     """The URL a file controller publishes, if it has one.
 
     A remote file carries its own address; a local one does not, and reading its
-    ``url`` may need a live connection, so failures are ignored.
+    ``url`` may need a live connection. A connection failure is reported and
+    then treated as "no URL", so the distribution still describes the file.
     """
     for attribute in ("download_url", "url", "access_url"):
         try:
             value = getattr(controller, attribute, None)
-        except Exception:  # noqa: BLE001 - a property may need a connection
+        except (AttributeError, ValueError, OSError) as error:
+            # a property that needs a connection, or a file that has no address
+            _logger.info(
+                "%s.%s is not readable: %s", type(controller).__name__, attribute, error
+            )
             continue
         if isinstance(value, str) and value:
             return value
@@ -173,9 +246,11 @@ class DatasetControllerMixin:
     def from_df(cls, df, **kwargs):
         """Build a dataset from a pint-pandas frame.
 
-        Columns matching a row field are converted to that field's declared unit
-        and stored; unknown columns are ignored. Remaining ``kwargs`` are passed
-        to the dataset (``label`` is required by the model).
+        Columns matching a row field are stored in that field's declared unit.
+        A field without a declared unit keeps the column's own unit, so a
+        ``to_df`` / ``from_df`` round trip does not reinterpret magnitudes.
+        Unknown columns are ignored; remaining ``kwargs`` are passed to the
+        dataset (``label`` is required by the model).
         """
         import pandas as pd
 
@@ -186,24 +261,34 @@ class DatasetControllerMixin:
         known = set(_value_fields(row_cls))
         columns = [name for name in df.columns if name in known]
 
-        magnitudes = {}
+        prepared = {}
         for field in columns:
             series = df[field]
-            unit = _declared_unit(row_cls, field)
-            if unit is not None and hasattr(series, "pint"):
-                series = series.pint.to(unit)
-            magnitudes[field] = (
-                series.pint.magnitude if hasattr(series, "pint") else series
+            declared = _declared_unit(row_cls, field)
+            is_pint = hasattr(series, "pint")
+            if declared is not None and is_pint:
+                series = series.pint.to(declared)
+            unit = str(series.pint.units) if is_pint else None
+            prepared[field] = (
+                series.pint.magnitude if is_pint else series,
+                _field_type(row_cls, field),
+                declared,
+                unit,
             )
 
         rows = []
         for i in range(len(df)):
             values = {}
             for field in columns:
-                magnitude = magnitudes[field].iloc[i]
-                if pd.isna(magnitude):
+                magnitudes, value_cls, declared, unit = prepared[field]
+                magnitude = magnitudes.iloc[i]
+                if magnitude is None or (
+                    not isinstance(magnitude, str) and pd.isna(magnitude)
+                ):
                     continue
-                values[field] = {"value": float(magnitude)}
+                values[field] = _row_value(
+                    cls, field, value_cls, magnitude, declared, unit
+                )
             rows.append(row_cls(**values))
         return cls(data=rows, **kwargs)
 
@@ -219,15 +304,16 @@ class DatasetControllerMixin:
         )
         if not url:
             return None
-        from opensemantic.core import RemoteFile
-
-        return get_file_controller(RemoteFile(label=self.label, download_url=url))
+        remote_cls = _remote_file_cls(self)
+        return get_file_controller(remote_cls(label=self.label, download_url=url))
 
     def materialize_data(self, distribution=None):
         """Fill ``data`` from a distribution's file and return the rows.
 
-        Without an explicit distribution the first one that has a readable file
-        is used. The file is parsed by its ``media_type`` (JSON or CSV).
+        Without an explicit distribution the first one that yields rows is
+        used: a distribution whose file cannot be read or parsed is reported
+        and the next one is tried. The file is parsed by its ``media_type``
+        (JSON or CSV).
         """
         import pandas as pd
 
@@ -237,29 +323,40 @@ class DatasetControllerMixin:
             else list(getattr(self, "distributions", None) or [])
         )
         row_cls = row_class_of(type(self))
+        if row_cls is None:
+            raise TypeError(f"{type(self).__name__}.data carries no row model to fill")
         for dist in distributions:
             controller = self._distribution_controller(dist)
             if controller is None:
                 continue
-            with controller.get() as handle:
-                payload = handle.read()
-            if isinstance(payload, str):
-                payload = payload.encode("utf-8")
+            try:
+                with controller.get() as handle:
+                    payload = handle.read()
+                if isinstance(payload, str):
+                    payload = payload.encode("utf-8")
 
-            media_type = getattr(dist, "media_type", None) or JSON_MEDIA_TYPE
-            if media_type == CSV_MEDIA_TYPE:
-                frame = pd.read_csv(
-                    io.BytesIO(payload), header=[0, 1], index_col=0
-                ).pint.quantify(level=-1)
-                self.data = type(self).from_df(frame, label=self.label).data
-            else:
-                entries = json.loads(payload.decode("utf-8"))
-                if isinstance(entries, dict):
-                    entries = entries.get("data", [])
-                self.data = [
-                    entry if isinstance(entry, row_cls) else row_cls(**entry)
-                    for entry in entries
-                ]
+                media_type = getattr(dist, "media_type", None) or JSON_MEDIA_TYPE
+                if media_type == CSV_MEDIA_TYPE:
+                    frame = pd.read_csv(
+                        io.BytesIO(payload), header=[0, 1], index_col=0
+                    ).pint.quantify(level=-1)
+                    self.data = type(self).from_df(frame, label=self.label).data
+                else:
+                    entries = json.loads(payload.decode("utf-8"))
+                    if isinstance(entries, dict):
+                        entries = entries.get("data", [])
+                    self.data = [
+                        entry if isinstance(entry, row_cls) else row_cls(**entry)
+                        for entry in entries
+                    ]
+            except Exception as error:  # noqa: BLE001 - the next one may work
+                _logger.warning(
+                    "%s: distribution %s could not be read: %s",
+                    type(self).__name__,
+                    getattr(dist, "download_url", None) or dist,
+                    error,
+                )
+                continue
             return self.data
         raise ValueError(
             f"{type(self).__name__} has no distribution with a readable file"
@@ -306,11 +403,14 @@ class DatasetControllerMixin:
         if fmt != "json":
             raise ValueError(f"Unsupported format: {fmt}")
         rows = self.data or []
+        # v2 models carry both .model_dump() and a deprecated .dict(), so the
+        # v2 form is tested first; its json mode is what keeps bytes, Decimal
+        # and datetime lossless rather than leaving them to json's default=str
         dump = [
             (
-                row.dict(exclude_none=True)
-                if hasattr(row, "dict")
-                else row.model_dump(exclude_none=True, mode="json")
+                row.model_dump(exclude_none=True, mode="json")
+                if hasattr(row, "model_dump")
+                else row.dict(exclude_none=True)
             )
             for row in rows
         ]

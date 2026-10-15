@@ -13,5 +13,12 @@ from opensemantic.base.v1._model import *  # noqa
 
 try:
     from opensemantic.base.v1._controller import *  # noqa
-except ImportError:
-    pass
+except ImportError as _error:  # pragma: no cover - an optional dependency is missing
+    # Without this the controllers are simply absent and every lookup returns
+    # the pure model, which reads as "no controller registered" rather than as
+    # a broken install.
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "opensemantic.base controllers are unavailable: %s", _error
+    )
