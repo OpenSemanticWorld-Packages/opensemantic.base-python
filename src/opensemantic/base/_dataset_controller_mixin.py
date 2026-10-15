@@ -294,26 +294,36 @@ class DatasetControllerMixin:
 
     # -- Distributions ----------------------------------------------------
 
-    def _distribution_controller(self, distribution):
-        """File controller for a distribution's file, or ``None``."""
+    def _distribution_controller(self, distribution, **controller_kwargs):
+        """File controller for a distribution's file, or ``None``.
+
+        ``controller_kwargs`` reach the controller, which is how a caller hands
+        it what it needs to read the file - a wiki session, for instance. A
+        controller that does not declare them ignores them.
+        """
         file = getattr(distribution, "file", None)
         if file is not None:
-            return get_file_controller(file)
+            return get_file_controller(file, **controller_kwargs)
         url = getattr(distribution, "download_url", None) or getattr(
             distribution, "access_url", None
         )
         if not url:
             return None
         remote_cls = _remote_file_cls(self)
-        return get_file_controller(remote_cls(label=self.label, download_url=url))
+        return get_file_controller(
+            remote_cls(label=self.label, download_url=url), **controller_kwargs
+        )
 
-    def materialize_data(self, distribution=None):
+    def materialize_data(self, distribution=None, **controller_kwargs):
         """Fill ``data`` from a distribution's file and return the rows.
 
         Without an explicit distribution the first one that yields rows is
         used: a distribution whose file cannot be read or parsed is reported
         and the next one is tried. The file is parsed by its ``media_type``
         (JSON or CSV).
+
+        ``controller_kwargs`` are handed to the file controller, which is how
+        a caller passes the session or credentials the file needs.
         """
         import pandas as pd
 
@@ -326,7 +336,7 @@ class DatasetControllerMixin:
         if row_cls is None:
             raise TypeError(f"{type(self).__name__}.data carries no row model to fill")
         for dist in distributions:
-            controller = self._distribution_controller(dist)
+            controller = self._distribution_controller(dist, **controller_kwargs)
             if controller is None:
                 continue
             try:
