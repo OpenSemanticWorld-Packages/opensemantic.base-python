@@ -19,6 +19,10 @@ except ImportError as _error:  # pragma: no cover - an optional dependency is mi
     # a broken install.
     import logging as _logging
 
-    _logging.getLogger(__name__).warning(
+    # info, not warning: the controllers are an optional extra, so a
+    # model-only install is a supported configuration - but a missing
+    # dependency must still be nameable, instead of the controllers simply
+    # not being there
+    _logging.getLogger(__name__).info(
         "opensemantic.base controllers are unavailable: %s", _error
     )

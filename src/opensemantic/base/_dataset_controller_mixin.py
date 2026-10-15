@@ -53,6 +53,10 @@ def _unwrap(annotation):
         ]  # noqa: E721
         if not args:
             return annotation
+        if origin is typing.Annotated:
+            # what follows the type is metadata, not an alternative to it
+            annotation = args[0]
+            continue
         if isinstance(origin, type) and issubclass(origin, abc.Mapping):
             annotation = args[-1]
             continue
@@ -141,14 +145,35 @@ def _remote_file_cls(dataset):
     return RemoteFile
 
 
+def _is_missing(value) -> bool:
+    """Whether a frame cell carries no value.
+
+    ``pd.isna`` answers element-wise for a sequence, and the array it returns
+    cannot be used as a condition; a cell holding a list is a value, not a gap.
+    """
+    import pandas as pd
+
+    if value is None:
+        return True
+    if isinstance(value, (str, bytes)) or isinstance(value, abc.Sequence):
+        return False
+    result = pd.isna(value)
+    return bool(result) if isinstance(result, bool) else False
+
+
 def _row_value(dataset_cls, field: str, value_cls, magnitude, declared, unit):
     """One cell of a frame as the value a row field takes.
 
     With a declared unit the column was converted to it, so the magnitude alone
     is unambiguous. Without one the column's own unit has to travel with the
     value, or the dataset reads back in the model's default unit instead.
+
+    A field that is not a model - a timestamp, a label, a flag - takes the cell
+    as it stands; there is nothing to build and no unit to carry.
     """
-    if _is_model_cls(value_cls) and isinstance(magnitude, value_cls):
+    if not _is_model_cls(value_cls):
+        return magnitude
+    if isinstance(magnitude, value_cls):
         return magnitude
     try:
         number = float(magnitude)
@@ -187,6 +212,20 @@ class _NamedBytesIO(io.BytesIO):
         self.name = name
 
 
+def _distribution_name(distribution) -> str:
+    """Something short that identifies a distribution in a log line.
+
+    The model's repr carries the whole file controller, which drowns the
+    message it is part of.
+    """
+    for attribute in ("download_url", "access_url"):
+        value = getattr(distribution, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    media_type = getattr(distribution, "media_type", None)
+    return f"<{type(distribution).__name__} {media_type or 'unknown type'}>"
+
+
 def _file_url(controller) -> Optional[str]:
     """The URL a file controller publishes, if it has one.
 
@@ -197,10 +236,16 @@ def _file_url(controller) -> Optional[str]:
     for attribute in ("download_url", "url", "access_url"):
         try:
             value = getattr(controller, attribute, None)
-        except (AttributeError, ValueError, OSError) as error:
-            # a property that needs a connection, or a file that has no address
-            _logger.info(
-                "%s.%s is not readable: %s", type(controller).__name__, attribute, error
+        except Exception as error:  # noqa: BLE001 - a property may do anything
+            # This runs after the upload, so letting the failure out would
+            # leave the file written with no distribution attached, and a
+            # retry would upload it twice. Reporting it keeps a real failure
+            # distinguishable from "this file has no address".
+            _logger.warning(
+                "%s.%s is not readable: %s",
+                type(controller).__name__,
+                attribute,
+                error,
             )
             continue
         if isinstance(value, str) and value:
@@ -252,8 +297,6 @@ class DatasetControllerMixin:
         Unknown columns are ignored; remaining ``kwargs`` are passed to the
         dataset (``label`` is required by the model).
         """
-        import pandas as pd
-
         row_cls = row_class_of(cls)
         if row_cls is None:
             raise TypeError(f"{cls.__name__}.data carries no row model to build")
@@ -282,9 +325,7 @@ class DatasetControllerMixin:
             for field in columns:
                 magnitudes, value_cls, declared, unit = prepared[field]
                 magnitude = magnitudes.iloc[i]
-                if magnitude is None or (
-                    not isinstance(magnitude, str) and pd.isna(magnitude)
-                ):
+                if _is_missing(magnitude):
                     continue
                 values[field] = _row_value(
                     cls, field, value_cls, magnitude, declared, unit
@@ -335,11 +376,15 @@ class DatasetControllerMixin:
         row_cls = row_class_of(type(self))
         if row_cls is None:
             raise TypeError(f"{type(self).__name__}.data carries no row model to fill")
+        last_error: Optional[Exception] = None
         for dist in distributions:
-            controller = self._distribution_controller(dist, **controller_kwargs)
-            if controller is None:
-                continue
             try:
+                # resolving the controller can fail too - an unreachable file
+                # entity, a reference that no longer resolves - and that is a
+                # reason to try the next distribution, not to give up
+                controller = self._distribution_controller(dist, **controller_kwargs)
+                if controller is None:
+                    continue
                 with controller.get() as handle:
                     payload = handle.read()
                 if isinstance(payload, str):
@@ -360,17 +405,20 @@ class DatasetControllerMixin:
                         for entry in entries
                     ]
             except Exception as error:  # noqa: BLE001 - the next one may work
+                last_error = error
                 _logger.warning(
                     "%s: distribution %s could not be read: %s",
                     type(self).__name__,
-                    getattr(dist, "download_url", None) or dist,
+                    _distribution_name(dist),
                     error,
                 )
                 continue
             return self.data
+        # chained: without the cause, a column that cannot be parsed reads as
+        # "there is no file", and the error naming the field is lost
         raise ValueError(
             f"{type(self).__name__} has no distribution with a readable file"
-        )
+        ) from last_error
 
     def externalize_data(self, file, fmt: str = "json", keep_data: bool = False):
         """Write ``data`` to ``file``, attach a distribution and clear ``data``.
