@@ -527,3 +527,65 @@ def test_a_foreign_csv_is_read_with_one_header_row(plain_ctx, tmp_path):
     rows = dataset.materialize_data()
 
     assert [(row.ID, row.city) for row in rows] == [(18, "Cambridge")]
+
+
+# -- frames without building rows ---------------------------------------------
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+def test_materialize_df_matches_the_rows(ctx, dataset, fmt, tmp_path):
+    """Same numbers as the row path, without constructing a single row."""
+    expected = dataset.to_df()
+    dataset.externalize_data(_local_file(ctx, tmp_path / f"rows.{fmt}"), fmt=fmt)
+
+    frame = dataset.materialize_df()
+
+    assert list(frame.columns) == list(expected.columns)
+    assert len(frame) == len(expected)
+    assert str(frame["temperature"].pint.units) == "kelvin"
+    assert frame["temperature"].pint.magnitude.tolist() == pytest.approx(
+        expected["temperature"].pint.magnitude.tolist()
+    )
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+def test_materialize_df_leaves_data_alone(ctx, dataset, fmt, tmp_path):
+    dataset.externalize_data(_local_file(ctx, tmp_path / f"rows.{fmt}"), fmt=fmt)
+    assert dataset.data is None
+
+    dataset.materialize_df()
+
+    assert dataset.data is None
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+def test_materialize_df_carries_plain_columns(mixed_ctx, fmt, tmp_path):
+    """A row field that is not a quantity survives the frame path too."""
+    dataset = _mixed_dataset(mixed_ctx)
+    dataset.externalize_data(_local_file(mixed_ctx, tmp_path / f"m.{fmt}"), fmt=fmt)
+
+    frame = dataset.materialize_df()
+
+    assert frame["note"].tolist() == ["start", "end"]
+    assert frame["cycle"].tolist() == [1, 2]
+
+
+def test_materialize_df_reports_an_unreadable_distribution(ctx, dataset, tmp_path):
+    dataset.externalize_data(_local_file(ctx, tmp_path / "rows.json"))
+    (tmp_path / "rows.json").unlink()
+
+    with pytest.raises(ValueError, match="no distribution"):
+        dataset.materialize_df()
+
+
+def test_to_df_converts_a_column_that_mixes_units(ctx):
+    """The vectorized path only applies when a column agrees on one unit."""
+    hot = ctx.Temperature(value=300.0)
+    cold = ctx.Temperature(value=30.0, unit=type(hot.unit)["Celsius"])
+    data = [ctx.Row(temperature=hot), ctx.Row(temperature=cold)]
+    dataset = ctx.cls(label=[ctx.core.Label(text="Mixed units")], data=data)
+
+    column = dataset.to_df()["temperature"]
+
+    assert str(column.pint.units) == "kelvin"
+    assert column.pint.magnitude.tolist() == pytest.approx([300.0, 303.15])
