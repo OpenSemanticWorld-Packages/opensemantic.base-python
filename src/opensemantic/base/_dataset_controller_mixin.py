@@ -146,6 +146,99 @@ def _remote_file_cls(dataset):
     return RemoteFile
 
 
+def _json_entries(payload: bytes) -> List[Any]:
+    """The row entries of a serialized dataset, list or ``{"data": [...]}``."""
+    entries = json.loads(payload.decode("utf-8"))
+    if isinstance(entries, dict):
+        entries = entries.get("data", [])
+    return entries
+
+
+def _pint_unit_for_iri(value_cls, iri: str) -> Optional[str]:
+    """The pint unit string a serialized unit IRI stands for."""
+    unit_field = _fields_of(value_cls).get("unit") if _is_model_cls(value_cls) else None
+    if unit_field is None:
+        return None
+    annotation = getattr(unit_field, "annotation", None) or getattr(
+        unit_field, "type_", None
+    )
+    members = getattr(_unwrap(annotation), "__members__", {})
+    for name, member in members.items():
+        if getattr(member, "value", None) == iri:
+            to_pint_str = getattr(value_cls, "get_pint_ureg_compatible_str", None)
+            return to_pint_str(name) if callable(to_pint_str) else name
+    return None
+
+
+def _frame_from_entries(row_cls, entries: List[Any]):
+    """Serialized rows as a frame, column by column, without building rows.
+
+    A serialized value is ``{"value": x, "unit": "Item:OSW..."}``. When a
+    column holds one unit - which is what a dataset written in one go looks
+    like - the magnitudes are read straight out and the unit is attached once.
+    A column that mixes units keeps its values and is left for the caller to
+    convert, since there is no single unit to give the column.
+    """
+    import pandas as pd
+
+    columns = {}
+    for field in _value_fields(row_cls):
+        value_cls = _field_type(row_cls, field)
+        raw = [
+            entry.get(field) if isinstance(entry, dict) else getattr(entry, field, None)
+            for entry in entries
+        ]
+        iris = {
+            value.get("unit")
+            for value in raw
+            if isinstance(value, dict) and value.get("unit") is not None
+        }
+        magnitudes = [
+            value.get("value") if isinstance(value, dict) else value for value in raw
+        ]
+        unit = _pint_unit_for_iri(value_cls, iris.pop()) if len(iris) == 1 else None
+        if unit is None:
+            unit = _declared_unit(row_cls, field) if not iris else None
+        if unit is None:
+            columns[field] = pd.Series(magnitudes, name=field, dtype="object")
+        else:
+            columns[field] = pd.Series(magnitudes, dtype=f"pint[{unit}]", name=field)
+    return pd.DataFrame(columns)
+
+
+def _own_unit(value_cls, value) -> Optional[str]:
+    """The pint unit a single value is already expressed in, if readable."""
+    name = getattr(getattr(value, "unit", None), "name", None)
+    if name is None:
+        return None
+    to_pint_str = getattr(value_cls, "get_pint_ureg_compatible_str", None)
+    return to_pint_str(name) if callable(to_pint_str) else name
+
+
+def _column_magnitudes(value_cls, values: List[Any], unit: str) -> List[Any]:
+    """A column's magnitudes in ``unit``.
+
+    Converting each value on its own costs a pint quantity, a unit parse and a
+    conversion per cell, which dominates a dataset of a few thousand rows. A
+    column almost always holds one unit, and when that unit is the target the
+    stored magnitudes already are the answer, so the whole column is read
+    without pint. A column that mixes units falls back to per-value
+    conversion.
+    """
+    present = [value for value in values if value is not None]
+    units = {_own_unit(value_cls, value) for value in present}
+    if (
+        len(units) == 1
+        and units.pop() == unit
+        and all(hasattr(value, "value") for value in present)
+    ):
+        return [value.value if value is not None else None for value in values]
+    return [
+        value.to_pint().to(unit).magnitude if value is not None else None
+        for value in values
+    ]
+
+
 def _is_missing(value) -> bool:
     """Whether a frame cell carries no value.
 
@@ -281,10 +374,7 @@ class DatasetControllerMixin:
             if unit is None:
                 columns[field] = pd.Series(values, name=field, dtype="object")
                 continue
-            magnitudes = [
-                value.to_pint().to(unit).magnitude if value is not None else None
-                for value in values
-            ]
+            magnitudes = _column_magnitudes(_field_type(row_cls, field), values, unit)
             columns[field] = pd.Series(magnitudes, dtype=f"pint[{unit}]", name=field)
         return pd.DataFrame(columns)
 
@@ -356,13 +446,13 @@ class DatasetControllerMixin:
             remote_cls(label=self.label, download_url=url), **controller_kwargs
         )
 
-    def materialize_data(self, distribution=None, **controller_kwargs):
-        """Fill ``data`` from a distribution's file and return the rows.
+    def _read_distribution(self, parse, distribution=None, **controller_kwargs):
+        """Read the first distribution ``parse`` can make something of.
 
-        Without an explicit distribution the first one that yields rows is
-        used: a distribution whose file cannot be read or parsed is reported
-        and the next one is tried. The file is parsed by its ``media_type``
-        (JSON or CSV).
+        A distribution whose file cannot be reached, read or parsed is
+        reported and the next one is tried; the error raised at the end
+        chains the last cause, so a column that will not parse does not read
+        as "there is no file".
 
         ``controller_kwargs`` are handed to the file controller, which is how
         a caller passes the session or credentials the file needs.
@@ -372,9 +462,6 @@ class DatasetControllerMixin:
             if distribution is not None
             else list(getattr(self, "distributions", None) or [])
         )
-        row_cls = row_class_of(type(self))
-        if row_cls is None:
-            raise TypeError(f"{type(self).__name__}.data carries no row model to fill")
         last_error: Optional[Exception] = None
         for dist in distributions:
             try:
@@ -388,22 +475,8 @@ class DatasetControllerMixin:
                     payload = handle.read()
                 if isinstance(payload, str):
                     payload = payload.encode("utf-8")
-
                 media_type = getattr(dist, "media_type", None) or JSON_MEDIA_TYPE
-                if media_type == CSV_MEDIA_TYPE:
-                    self.data = (
-                        type(self)
-                        .from_df(_pint_csv.read_csv(payload), label=self.label)
-                        .data
-                    )
-                else:
-                    entries = json.loads(payload.decode("utf-8"))
-                    if isinstance(entries, dict):
-                        entries = entries.get("data", [])
-                    self.data = [
-                        entry if isinstance(entry, row_cls) else row_cls(**entry)
-                        for entry in entries
-                    ]
+                return parse(payload, media_type)
             except Exception as error:  # noqa: BLE001 - the next one may work
                 last_error = error
                 _logger.warning(
@@ -413,12 +486,60 @@ class DatasetControllerMixin:
                     error,
                 )
                 continue
-            return self.data
-        # chained: without the cause, a column that cannot be parsed reads as
-        # "there is no file", and the error naming the field is lost
         raise ValueError(
             f"{type(self).__name__} has no distribution with a readable file"
         ) from last_error
+
+    def materialize_df(self, distribution=None, **controller_kwargs):
+        """A distribution's content as a DataFrame, without building rows.
+
+        What a caller that only plots or aggregates needs. Building the typed
+        rows first and flattening them again costs a pydantic model per cell,
+        which is what makes a dataset of a hundred thousand rows take minutes;
+        read straight into a frame and it takes the time pandas needs.
+
+        ``data`` is left alone. Use :meth:`materialize_data` for the rows.
+        """
+        row_cls = row_class_of(type(self))
+
+        def parse(payload: bytes, media_type: str):
+            if media_type == CSV_MEDIA_TYPE:
+                return _pint_csv.read_csv(payload)
+            if row_cls is None:
+                raise TypeError(
+                    f"{type(self).__name__}.data carries no row model to read"
+                )
+            return _frame_from_entries(row_cls, _json_entries(payload))
+
+        return self._read_distribution(parse, distribution, **controller_kwargs)
+
+    def materialize_data(self, distribution=None, **controller_kwargs):
+        """Fill ``data`` from a distribution's file and return the rows.
+
+        Without an explicit distribution the first one that yields rows is
+        used. The file is parsed by its ``media_type`` (JSON or CSV).
+
+        ``controller_kwargs`` are handed to the file controller, which is how
+        a caller passes the session or credentials the file needs.
+        """
+        row_cls = row_class_of(type(self))
+        if row_cls is None:
+            raise TypeError(f"{type(self).__name__}.data carries no row model to fill")
+
+        def parse(payload: bytes, media_type: str):
+            if media_type == CSV_MEDIA_TYPE:
+                return (
+                    type(self)
+                    .from_df(_pint_csv.read_csv(payload), label=self.label)
+                    .data
+                )
+            return [
+                entry if isinstance(entry, row_cls) else row_cls(**entry)
+                for entry in _json_entries(payload)
+            ]
+
+        self.data = self._read_distribution(parse, distribution, **controller_kwargs)
+        return self.data
 
     def externalize_data(self, file, fmt: str = "json", keep_data: bool = False):
         """Write ``data`` to ``file``, attach a distribution and clear ``data``.
